@@ -174,6 +174,7 @@ class RAG(adal.Component):
         # Determine embedder type based on current configuration
         self.embedder_type = get_embedder_type()
         self.is_ollama_embedder = (self.embedder_type == 'ollama')  # Backward compatibility
+        self.is_mlx_embedder = (self.embedder_type == 'mlx')
 
         # Check if Ollama model exists before proceeding
         if self.is_ollama_embedder:
@@ -185,6 +186,13 @@ class RAG(adal.Component):
                 model_name = embedder_config["model_kwargs"]["model"]
                 if not check_ollama_model_exists(model_name):
                     raise Exception(f"Ollama model '{model_name}' not found. Please run 'ollama pull {model_name}' to install it.")
+
+        # Check if MLX server is reachable before proceeding
+        if self.is_mlx_embedder:
+            from api.mlx_client import check_mlx_server_running
+            
+            if not check_mlx_server_running():
+                raise Exception("MLX LM server is not reachable. Please start it with 'mlx_lm.server --model <model_name>' first.")
 
         # Initialize components
         self.memory = Memory()
@@ -202,8 +210,8 @@ class RAG(adal.Component):
             assert instance is not None, "RAG instance is no longer available, but the query embedder was called."
             return instance.embedder(input=query)
 
-        # Use single string embedder for Ollama, regular embedder for others
-        self.query_embedder = single_string_embedder if self.is_ollama_embedder else self.embedder
+        # Use single string embedder for Ollama and MLX, regular embedder for others
+        self.query_embedder = single_string_embedder if (self.is_ollama_embedder or self.is_mlx_embedder) else self.embedder
 
         self.initialize_db_manager()
 
@@ -381,7 +389,7 @@ IMPORTANT FORMATTING RULES:
 
         try:
             # Use the appropriate embedder for retrieval
-            retrieve_embedder = self.query_embedder if self.is_ollama_embedder else self.embedder
+            retrieve_embedder = self.query_embedder if (self.is_ollama_embedder or self.is_mlx_embedder) else self.embedder
             self.retriever = FAISSRetriever(
                 **configs["retriever"],
                 embedder=retrieve_embedder,

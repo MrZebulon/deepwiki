@@ -18,6 +18,7 @@ from api.openrouter_client import OpenRouterClient
 from api.bedrock_client import BedrockClient
 from api.azureai_client import AzureAIClient
 from api.dashscope_client import DashscopeClient
+from api.mlx_client import MLXClient
 from api.rag import RAG
 from api.prompts import (
     DEEP_RESEARCH_FIRST_ITERATION_PROMPT,
@@ -64,7 +65,7 @@ class ChatCompletionRequest(BaseModel):
     type: Optional[str] = Field("github", description="Type of repository (e.g., 'github', 'gitlab', 'bitbucket')")
 
     # model parameters
-    provider: str = Field("google", description="Model provider (google, openai, openrouter, ollama, bedrock, azure, dashscope)")
+    provider: str = Field("google", description="Model provider (google, openai, openrouter, ollama, bedrock, azure, dashscope, mlx)")
     model: Optional[str] = Field(None, description="Model name for the specified provider")
 
     language: Optional[str] = Field("en", description="Language for content generation (e.g., 'en', 'ja', 'zh', 'es', 'kr', 'vi')")
@@ -449,6 +450,23 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                 model_kwargs=model_kwargs,
                 model_type=ModelType.LLM,
             )
+        elif request.provider == "mlx":
+            logger.info(f"Using MLX with model: {request.model}")
+
+            model = MLXClient()
+            model_kwargs = {
+                "model": model_config["model"],
+                "stream": True,
+                "temperature": model_config.get("temperature", 0.7),
+            }
+            if "top_p" in model_config:
+                model_kwargs["top_p"] = model_config["top_p"]
+
+            api_kwargs = model.convert_inputs_to_api_kwargs(
+                input=prompt,
+                model_kwargs=model_kwargs,
+                model_type=ModelType.LLM,
+            )
         else:
             # Initialize Google Generative AI model (default provider)
             model = genai.GenerativeModel(
@@ -548,6 +566,24 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                             f"\nError with Dashscope API: {str(e_dashscope)}\n\n"
                             "Please check that you have set the DASHSCOPE_API_KEY (and optionally "
                             "DASHSCOPE_WORKSPACE_ID) environment variables with valid values."
+                        )
+                elif request.provider == "mlx":
+                    try:
+                        logger.info("Making MLX LM API call")
+                        response = await model.acall(
+                            api_kwargs=api_kwargs, model_type=ModelType.LLM
+                        )
+                        # MLXClient.acall with stream=True returns an async
+                        # generator of text chunks
+                        async for text in response:
+                            if text:
+                                yield text
+                    except Exception as e_mlx:
+                        logger.error(f"Error with MLX LM API: {str(e_mlx)}")
+                        yield (
+                            f"\nError with MLX LM API: {str(e_mlx)}\n\n"
+                            "Please check that the MLX LM server is running. "
+                            "Start it with: mlx_lm.server --model <model_name>"
                         )
                 else:
                     # Google Generative AI (default provider)
@@ -709,6 +745,31 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                                     f"\nError with Dashscope API fallback: {str(e_fallback)}\n\n"
                                     "Please check that you have set the DASHSCOPE_API_KEY (and optionally "
                                     "DASHSCOPE_WORKSPACE_ID) environment variables with valid values."
+                                )
+                        elif request.provider == "mlx":
+                            try:
+                                fallback_api_kwargs = model.convert_inputs_to_api_kwargs(
+                                    input=simplified_prompt,
+                                    model_kwargs=model_kwargs,
+                                    model_type=ModelType.LLM,
+                                )
+
+                                logger.info("Making fallback MLX LM API call")
+                                fallback_response = await model.acall(
+                                    api_kwargs=fallback_api_kwargs, model_type=ModelType.LLM
+                                )
+
+                                async for text in fallback_response:
+                                    if text:
+                                        yield text
+                            except Exception as e_fallback:
+                                logger.error(
+                                    f"Error with MLX LM API fallback: {str(e_fallback)}"
+                                )
+                                yield (
+                                    f"\nError with MLX LM API fallback: {str(e_fallback)}\n\n"
+                                    "Please check that the MLX LM server is running. "
+                                    "Start it with: mlx_lm.server --model <model_name>"
                                 )
                         else:
                             # Google Generative AI fallback (default provider)

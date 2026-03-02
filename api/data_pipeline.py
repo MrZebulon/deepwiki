@@ -12,6 +12,7 @@ from adalflow.utils import get_adalflow_default_root_path
 from adalflow.core.db import LocalDB
 from api.config import configs, DEFAULT_EXCLUDED_DIRS, DEFAULT_EXCLUDED_FILES
 from api.ollama_patch import OllamaDocumentProcessor
+from api.mlx_patch import MLXDocumentProcessor
 from urllib.parse import urlparse, urlunparse, quote
 import requests
 from requests.exceptions import RequestException
@@ -57,6 +58,9 @@ def count_tokens(text: str, embedder_type: str = None, is_ollama_embedder: bool 
             encoding = tiktoken.get_encoding("cl100k_base")
         elif embedder_type == 'bedrock':
             # Bedrock embedding models vary; use a common GPT-like encoding for rough estimation
+            encoding = tiktoken.get_encoding("cl100k_base")
+        elif embedder_type == 'mlx':
+            # MLX models use similar tokenization; use cl100k_base for rough estimation
             encoding = tiktoken.get_encoding("cl100k_base")
         else:  # OpenAI or default
             # Use OpenAI embedding model encoding
@@ -411,6 +415,9 @@ def prepare_data_pipeline(embedder_type: str = None, is_ollama_embedder: bool = 
     if embedder_type == 'ollama':
         # Use Ollama document processor for single-document processing
         embedder_transformer = OllamaDocumentProcessor(embedder=embedder)
+    elif embedder_type == 'mlx':
+        # Use MLX document processor for single-document processing
+        embedder_transformer = MLXDocumentProcessor(embedder=embedder)
     else:
         # Use batch processing for OpenAI and Google embedders
         batch_size = embedder_config.get("batch_size", 500)

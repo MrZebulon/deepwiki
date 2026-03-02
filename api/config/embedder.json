@@ -30,6 +30,12 @@
       "dimensions": 256
     }
   },
+  "embedder_mlx": {
+    "client_class": "MLXClient",
+    "model_kwargs": {
+      "model": "mlx-community/all-MiniLM-L6-v2-4bit"
+    }
+  },
   "retriever": {
     "top_k": 20
   },
