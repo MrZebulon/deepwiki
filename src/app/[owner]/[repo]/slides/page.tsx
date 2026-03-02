@@ -20,6 +20,8 @@ const addTokensToRequestBody = (
   isCustomModel: boolean = false,
   customModel: string = '',
   language: string = 'en',
+  branch?: string,
+  commit?: string,
 ) => {
   if (token !== '') {
     requestBody.token = token;
@@ -33,6 +35,13 @@ const addTokensToRequestBody = (
   }
 
   requestBody.language = language;
+
+  if (branch) {
+    requestBody.branch = branch;
+  }
+  if (commit) {
+    requestBody.commit = commit;
+  }
 };
 
 interface Slide {
@@ -60,6 +69,8 @@ export default function SlidesPage() {
   const modelParam = searchParams.get('model') || '';
   const isCustomModelParam = searchParams.get('is_custom_model') === 'true';
   const customModelParam = searchParams.get('custom_model') || '';
+  const branchParam = searchParams.get('branch') || '';
+  const commitParam = searchParams.get('commit') || '';
   const language = searchParams.get('language') || 'en';
 
   // Import language context for translations
@@ -72,8 +83,10 @@ export default function SlidesPage() {
     type: repoType,
     token: token || null,
     localPath: localPath || null,
-    repoUrl: repoUrl || null
-  }), [owner, repo, repoType, token, localPath, repoUrl]);
+    repoUrl: repoUrl || null,
+    branch: branchParam || null,
+    commit: commitParam || null,
+  }), [owner, repo, repoType, token, localPath, repoUrl, branchParam, commitParam]);
 
   // State variables
   const [isLoading, setIsLoading] = useState(false);
@@ -127,6 +140,13 @@ export default function SlidesPage() {
         repo_type: repoInfo.type,
         language: language,
       });
+
+      if (repoInfo.branch) {
+        params.append('branch', repoInfo.branch);
+      }
+      if (repoInfo.commit) {
+        params.append('commit', repoInfo.commit);
+      }
       const response = await fetch(`/api/wiki_cache?${params.toString()}`);
 
       if (response.ok) {
@@ -148,7 +168,7 @@ export default function SlidesPage() {
       console.error('Error loading from server cache:', error);
       return null;
     }
-  }, [repoInfo.owner, repoInfo.repo, repoInfo.type, language]);
+  }, [repoInfo.owner, repoInfo.repo, repoInfo.type, repoInfo.branch, repoInfo.commit, language]);
 
   // Generate slides content
   const generateSlidesContent = useCallback(async () => {
@@ -258,7 +278,7 @@ Give me the numbered list with brief descriptions for each slide. Be creative bu
       };
 
       // Add tokens if available
-      addTokensToRequestBody(planRequestBody, token, repoInfo.type, providerParam, modelParam, isCustomModelParam, customModelParam, language);
+      addTokensToRequestBody(planRequestBody, token, repoInfo.type, providerParam, modelParam, isCustomModelParam, customModelParam, language, repoInfo.branch || undefined, repoInfo.commit || undefined);
 
       // Use WebSocket for communication
       let planContent = '';
@@ -534,7 +554,7 @@ Please return ONLY the HTML with no markdown formatting or code blocks. Just the
         };
 
         // Add tokens if available
-        addTokensToRequestBody(slideRequestBody, token, repoInfo.type, providerParam, modelParam, isCustomModelParam, customModelParam, language);
+        addTokensToRequestBody(slideRequestBody, token, repoInfo.type, providerParam, modelParam, isCustomModelParam, customModelParam, language, repoInfo.branch || undefined, repoInfo.commit || undefined);
 
         // Use WebSocket for communication
         let slideContent = '';

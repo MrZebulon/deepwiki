@@ -21,6 +21,8 @@ const addTokensToRequestBody = (
   isCustomModel: boolean = false,
   customModel: string = '',
   language: string = 'en',
+  branch?: string,
+  commit?: string,
 ) => {
   if (token !== '') {
     requestBody.token = token;
@@ -34,6 +36,13 @@ const addTokensToRequestBody = (
   }
 
   requestBody.language = language;
+
+  if (branch) {
+    requestBody.branch = branch;
+  }
+  if (commit) {
+    requestBody.commit = commit;
+  }
 };
 
 export default function WorkshopPage() {
@@ -54,6 +63,8 @@ export default function WorkshopPage() {
   const modelParam = searchParams.get('model') || '';
   const isCustomModelParam = searchParams.get('is_custom_model') === 'true';
   const customModelParam = searchParams.get('custom_model') || '';
+  const branchParam = searchParams.get('branch') || '';
+  const commitParam = searchParams.get('commit') || '';
   const language = searchParams.get('language') || 'en';
 
   // Import language context for translations
@@ -66,8 +77,10 @@ export default function WorkshopPage() {
     type: repoType,
     token: token || null,
     localPath: localPath || null,
-    repoUrl: repoUrl || null
-  }), [owner, repo, repoType, token, localPath, repoUrl]);
+    repoUrl: repoUrl || null,
+    branch: branchParam || null,
+    commit: commitParam || null,
+  }), [owner, repo, repoType, token, localPath, repoUrl, branchParam, commitParam]);
 
   // State variables
   const [isLoading, setIsLoading] = useState(false);
@@ -118,6 +131,13 @@ export default function WorkshopPage() {
         repo_type: repoInfo.type,
         language: language,
       });
+
+      if (repoInfo.branch) {
+        params.append('branch', repoInfo.branch);
+      }
+      if (repoInfo.commit) {
+        params.append('commit', repoInfo.commit);
+      }
       const response = await fetch(`/api/wiki_cache?${params.toString()}`);
 
       if (response.ok) {
@@ -139,7 +159,7 @@ export default function WorkshopPage() {
       console.error('Error loading from server cache:', error);
       return null;
     }
-  }, [repoInfo.owner, repoInfo.repo, repoInfo.type, language]);
+  }, [repoInfo.owner, repoInfo.repo, repoInfo.type, repoInfo.branch, repoInfo.commit, language]);
 
   // Generate workshop content
   const generateWorkshopContent = useCallback(async () => {
@@ -310,7 +330,7 @@ Make the workshop content in ${language === 'en' ? 'English' :
       };
 
       // Add tokens if available
-      addTokensToRequestBody(requestBody, token, repoInfo.type, providerParam, modelParam, isCustomModelParam, customModelParam, language);
+      addTokensToRequestBody(requestBody, token, repoInfo.type, providerParam, modelParam, isCustomModelParam, customModelParam, language, repoInfo.branch || undefined, repoInfo.commit || undefined);
 
       // Use WebSocket for communication
       let content = '';

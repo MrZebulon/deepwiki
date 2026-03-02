@@ -94,6 +94,8 @@ export default function Home() {
           setIsCustomModel(config.isCustomModel || false);
           setCustomModel(config.customModel || '');
           setSelectedPlatform(config.selectedPlatform || 'github');
+          setSelectedBranch(config.selectedBranch || '');
+          setSelectedCommit(config.selectedCommit || '');
           setExcludedDirs(config.excludedDirs || '');
           setExcludedFiles(config.excludedFiles || '');
           setIncludedDirs(config.includedDirs || '');
@@ -135,6 +137,8 @@ export default function Home() {
   const [includedDirs, setIncludedDirs] = useState('');
   const [includedFiles, setIncludedFiles] = useState('');
   const [selectedPlatform, setSelectedPlatform] = useState<'github' | 'gitlab' | 'bitbucket'>('github');
+  const [selectedBranch, setSelectedBranch] = useState('');
+  const [selectedCommit, setSelectedCommit] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -318,6 +322,8 @@ export default function Home() {
           isCustomModel,
           customModel,
           selectedPlatform,
+          selectedBranch,
+          selectedCommit,
           excludedDirs,
           excludedFiles,
           includedDirs,
@@ -348,6 +354,14 @@ export default function Home() {
     if (accessToken) {
       params.append('token', accessToken);
     }
+
+    if (selectedBranch.trim()) {
+      params.append('branch', selectedBranch.trim());
+    }
+    if (selectedCommit.trim()) {
+      params.append('commit', selectedCommit.trim());
+    }
+
     // Always include the type parameter
     params.append('type', (type == 'local' ? type : selectedPlatform) || 'github');
     // Add local path if it exists
@@ -462,6 +476,10 @@ export default function Home() {
             setSelectedPlatform={setSelectedPlatform}
             accessToken={accessToken}
             setAccessToken={setAccessToken}
+            selectedBranch={selectedBranch}
+            setSelectedBranch={setSelectedBranch}
+            selectedCommit={selectedCommit}
+            setSelectedCommit={setSelectedCommit}
             excludedDirs={excludedDirs}
             setExcludedDirs={setExcludedDirs}
             excludedFiles={excludedFiles}

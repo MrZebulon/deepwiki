@@ -79,6 +79,11 @@ export default function UserSelector({
   const [showDefaultDirs, setShowDefaultDirs] = useState(false);
   const [showDefaultFiles, setShowDefaultFiles] = useState(false);
 
+  const availableProviders = modelConfig?.providers || [];
+  const selectedProviderConfig = availableProviders.find((p: Provider) => p.id === provider);
+  const hasProviders = availableProviders.length > 0;
+  const hasModelsForSelectedProvider = Boolean(selectedProviderConfig?.models?.length);
+
   // Fetch model configurations from the backend
   useEffect(() => {
     const fetchModelConfig = async () => {
@@ -95,14 +100,29 @@ export default function UserSelector({
         const data = await response.json();
         setModelConfig(data);
 
+        const providers: Provider[] = Array.isArray(data.providers) ? data.providers : [];
+        const resolvedDefaultProvider = providers.find((p: Provider) => p.id === data.defaultProvider)?.id
+          || providers[0]?.id
+          || '';
+
+        if (providers.length === 0) {
+          setProvider('');
+          setModel('');
+          setIsCustomModel(false);
+          setCustomModel('');
+          return;
+        }
+
         // Initialize provider and model with defaults from API if not already set
-        if (!provider && data.defaultProvider) {
-          setProvider(data.defaultProvider);
+        if (!provider && resolvedDefaultProvider) {
+          setProvider(resolvedDefaultProvider);
 
           // Find the default provider and set its default model
-          const selectedProvider = data.providers.find((p: Provider) => p.id === data.defaultProvider);
+          const selectedProvider = providers.find((p: Provider) => p.id === resolvedDefaultProvider);
           if (selectedProvider && selectedProvider.models.length > 0) {
             setModel(selectedProvider.models[0].id);
+          } else {
+            setModel('');
           }
         }
       } catch (err) {
@@ -128,6 +148,8 @@ export default function UserSelector({
         const selectedProvider = modelConfig.providers.find((p: Provider) => p.id === newProvider);
         if (selectedProvider && selectedProvider.models.length > 0) {
           setModel(selectedProvider.models[0].id);
+        } else {
+          setModel('');
         }
       }
     }, 10);
@@ -286,9 +308,14 @@ next.config.js
             value={provider}
             onChange={(e) => handleProviderChange(e.target.value)}
             className="input-japanese block w-full px-2.5 py-1.5 text-sm rounded-md bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+            disabled={!hasProviders}
           >
-            <option value="" disabled>{t.form?.selectProvider || 'Select Provider'}</option>
-            {modelConfig?.providers.map((providerOption) => (
+            {!hasProviders ? (
+              <option value="">{t.form?.noProvidersAvailable || 'No Providers Available'}</option>
+            ) : (
+              <option value="" disabled>{t.form?.selectProvider || 'Select Provider'}</option>
+            )}
+            {availableProviders.map((providerOption) => (
               <option key={providerOption.id} value={providerOption.id}>
                 {t.form?.[`provider${providerOption.id.charAt(0).toUpperCase() + providerOption.id.slice(1)}`] || providerOption.name}
               </option>
@@ -320,19 +347,23 @@ next.config.js
               value={model}
               onChange={(e) => setModel(e.target.value)}
               className="input-japanese block w-full px-2.5 py-1.5 text-sm rounded-md bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
-              disabled={!provider || isLoading || !modelConfig?.providers.find(p => p.id === provider)?.models?.length}
+              disabled={!provider || isLoading || !hasModelsForSelectedProvider}
             >
-              {modelConfig?.providers.find((p: Provider) => p.id === provider)?.models.map((modelOption) => (
-                <option key={modelOption.id} value={modelOption.id}>
-                  {modelOption.name}
-                </option>
-              )) || <option value="">{t.form?.selectModel || 'Select Model'}</option>}
+              {!hasModelsForSelectedProvider ? (
+                <option value="">{t.form?.noModelsAvailable || 'No Models Available'}</option>
+              ) : (
+                selectedProviderConfig?.models.map((modelOption) => (
+                  <option key={modelOption.id} value={modelOption.id}>
+                    {modelOption.name}
+                  </option>
+                ))
+              )}
             </select>
           )}
         </div>
 
         {/* Custom model toggle - only when provider supports it */}
-        {modelConfig?.providers.find((p: Provider) => p.id === provider)?.supportsCustomModel && (
+        {selectedProviderConfig?.supportsCustomModel && hasProviders && (
           <div className="mb-2">
             <div className="flex items-center pb-1">
               <div

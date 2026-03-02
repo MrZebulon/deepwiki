@@ -64,6 +64,8 @@ class RepoInfo(BaseModel):
     token: Optional[str] = None
     localPath: Optional[str] = None
     repoUrl: Optional[str] = None
+    branch: Optional[str] = None
+    commit: Optional[str] = None
 
 
 class WikiSection(BaseModel):
@@ -146,6 +148,44 @@ class AuthorizationConfig(BaseModel):
 
 from api.config import configs, WIKI_AUTH_MODE, WIKI_AUTH_CODE
 
+
+def _is_provider_available(provider_id: str) -> bool:
+    """
+    Determine whether a provider is available based on environment configuration.
+
+    Providers that require credentials are exposed only when required env vars exist.
+    Local providers remain available without API keys.
+    """
+    provider_id = provider_id.lower()
+
+    if provider_id == "google":
+        return bool(os.environ.get("GOOGLE_API_KEY"))
+    if provider_id == "openai":
+        return bool(os.environ.get("OPENAI_API_KEY"))
+    if provider_id == "openrouter":
+        return bool(os.environ.get("OPENROUTER_API_KEY"))
+    if provider_id == "azure":
+        return bool(
+            os.environ.get("AZURE_OPENAI_API_KEY")
+            and os.environ.get("AZURE_OPENAI_ENDPOINT")
+            and os.environ.get("AZURE_OPENAI_VERSION")
+        )
+    if provider_id == "dashscope":
+        return bool(os.environ.get("DASHSCOPE_API_KEY"))
+    if provider_id == "bedrock":
+        has_static_credentials = bool(
+            os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY")
+        )
+        has_role_or_profile = bool(os.environ.get("AWS_ROLE_ARN") or os.environ.get("AWS_PROFILE"))
+        return has_static_credentials or has_role_or_profile
+
+    # Local/self-hosted providers do not require API keys by default.
+    if provider_id in {"ollama", "mlx"}:
+        return True
+
+    # Unknown providers: keep them available by default to avoid breaking custom setups.
+    return True
+
 @app.get("/lang/config")
 async def get_lang_config():
     return configs["lang_config"]
@@ -180,10 +220,14 @@ async def get_model_config():
 
         # Create providers from the config file
         providers = []
-        default_provider = configs.get("default_provider", "google")
+        configured_default_provider = configs.get("default_provider", "google")
 
         # Add provider configuration based on config.py
         for provider_id, provider_config in configs["providers"].items():
+            if not _is_provider_available(provider_id):
+                logger.info(f"Skipping unavailable provider '{provider_id}' due to missing configuration")
+                continue
+
             models = []
             # Add models from config
             for model_id in provider_config["models"].keys():
@@ -200,6 +244,13 @@ async def get_model_config():
                 )
             )
 
+        available_provider_ids = {provider.id for provider in providers}
+        default_provider = (
+            configured_default_provider
+            if configured_default_provider in available_provider_ids
+            else (providers[0].id if providers else "")
+        )
+
         # Create and return the full configuration
         config = ModelConfig(
             providers=providers,
@@ -209,19 +260,10 @@ async def get_model_config():
 
     except Exception as e:
         logger.error(f"Error creating model configuration: {str(e)}")
-        # Return some default configuration in case of error
+        # Return an empty configuration in case of error to let UI handle gracefully.
         return ModelConfig(
-            providers=[
-                Provider(
-                    id="google",
-                    name="Google",
-                    supportsCustomModel=True,
-                    models=[
-                        Model(id="gemini-2.5-flash", name="Gemini 2.5 Flash")
-                    ]
-                )
-            ],
-            defaultProvider="google"
+            providers=[],
+            defaultProvider=""
         )
 
 @app.post("/export/wiki")
@@ -405,14 +447,37 @@ app.add_websocket_route("/ws/chat", handle_websocket_chat)
 WIKI_CACHE_DIR = os.path.join(get_adalflow_default_root_path(), "wikicache")
 os.makedirs(WIKI_CACHE_DIR, exist_ok=True)
 
-def get_wiki_cache_path(owner: str, repo: str, repo_type: str, language: str) -> str:
+def _sanitize_cache_segment(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in value)
+
+
+def get_wiki_cache_path(
+    owner: str,
+    repo: str,
+    repo_type: str,
+    language: str,
+    branch: Optional[str] = None,
+    commit: Optional[str] = None,
+) -> str:
     """Generates the file path for a given wiki cache."""
-    filename = f"deepwiki_cache_{repo_type}_{owner}_{repo}_{language}.json"
+    filename = f"deepwiki_cache_{repo_type}_{owner}_{repo}_{language}"
+    if branch:
+        filename += f"__branch_{_sanitize_cache_segment(branch)}"
+    if commit:
+        filename += f"__commit_{_sanitize_cache_segment(commit)}"
+    filename += ".json"
     return os.path.join(WIKI_CACHE_DIR, filename)
 
-async def read_wiki_cache(owner: str, repo: str, repo_type: str, language: str) -> Optional[WikiCacheData]:
+async def read_wiki_cache(
+    owner: str,
+    repo: str,
+    repo_type: str,
+    language: str,
+    branch: Optional[str] = None,
+    commit: Optional[str] = None,
+) -> Optional[WikiCacheData]:
     """Reads wiki cache data from the file system."""
-    cache_path = get_wiki_cache_path(owner, repo, repo_type, language)
+    cache_path = get_wiki_cache_path(owner, repo, repo_type, language, branch, commit)
     if os.path.exists(cache_path):
         try:
             with open(cache_path, 'r', encoding='utf-8') as f:
@@ -425,7 +490,14 @@ async def read_wiki_cache(owner: str, repo: str, repo_type: str, language: str) 
 
 async def save_wiki_cache(data: WikiCacheRequest) -> bool:
     """Saves wiki cache data to the file system."""
-    cache_path = get_wiki_cache_path(data.repo.owner, data.repo.repo, data.repo.type, data.language)
+    cache_path = get_wiki_cache_path(
+        data.repo.owner,
+        data.repo.repo,
+        data.repo.type,
+        data.language,
+        data.repo.branch,
+        data.repo.commit,
+    )
     logger.info(f"Attempting to save wiki cache. Path: {cache_path}")
     try:
         payload = WikiCacheData(
@@ -463,7 +535,9 @@ async def get_cached_wiki(
     owner: str = Query(..., description="Repository owner"),
     repo: str = Query(..., description="Repository name"),
     repo_type: str = Query(..., description="Repository type (e.g., github, gitlab)"),
-    language: str = Query(..., description="Language of the wiki content")
+    language: str = Query(..., description="Language of the wiki content"),
+    branch: Optional[str] = Query(None, description="Optional branch name"),
+    commit: Optional[str] = Query(None, description="Optional commit SHA"),
 ):
     """
     Retrieves cached wiki data (structure and generated pages) for a repository.
@@ -473,8 +547,8 @@ async def get_cached_wiki(
     if not supported_langs.__contains__(language):
         language = configs["lang_config"]["default"]
 
-    logger.info(f"Attempting to retrieve wiki cache for {owner}/{repo} ({repo_type}), lang: {language}")
-    cached_data = await read_wiki_cache(owner, repo, repo_type, language)
+    logger.info(f"Attempting to retrieve wiki cache for {owner}/{repo} ({repo_type}), lang: {language}, branch: {branch}, commit: {commit}")
+    cached_data = await read_wiki_cache(owner, repo, repo_type, language, branch, commit)
     if cached_data:
         return cached_data
     else:
@@ -507,6 +581,8 @@ async def delete_wiki_cache(
     repo: str = Query(..., description="Repository name"),
     repo_type: str = Query(..., description="Repository type (e.g., github, gitlab)"),
     language: str = Query(..., description="Language of the wiki content"),
+    branch: Optional[str] = Query(None, description="Optional branch name"),
+    commit: Optional[str] = Query(None, description="Optional commit SHA"),
     authorization_code: Optional[str] = Query(None, description="Authorization code")
 ):
     """
@@ -522,8 +598,8 @@ async def delete_wiki_cache(
         if not authorization_code or WIKI_AUTH_CODE != authorization_code:
             raise HTTPException(status_code=401, detail="Authorization code is invalid")
 
-    logger.info(f"Attempting to delete wiki cache for {owner}/{repo} ({repo_type}), lang: {language}")
-    cache_path = get_wiki_cache_path(owner, repo, repo_type, language)
+    logger.info(f"Attempting to delete wiki cache for {owner}/{repo} ({repo_type}), lang: {language}, branch: {branch}, commit: {commit}")
+    cache_path = get_wiki_cache_path(owner, repo, repo_type, language, branch, commit)
 
     if os.path.exists(cache_path):
         try:
@@ -596,7 +672,10 @@ async def get_processed_projects():
                 file_path = os.path.join(WIKI_CACHE_DIR, filename)
                 try:
                     stats = await asyncio.to_thread(os.stat, file_path) # Use asyncio.to_thread for os.stat
-                    parts = filename.replace("deepwiki_cache_", "").replace(".json", "").split('_')
+                    base_name = filename.replace("deepwiki_cache_", "").replace(".json", "")
+                    # Strip optional reference suffixes (e.g., __branch_main, __commit_abcd1234)
+                    base_name = base_name.split("__", 1)[0]
+                    parts = base_name.split('_')
 
                     # Expecting repo_type_owner_repo_language
                     # Example: deepwiki_cache_github_AsyncFuncAI_deepwiki-open_en.json

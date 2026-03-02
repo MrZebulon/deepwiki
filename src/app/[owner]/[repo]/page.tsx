@@ -88,8 +88,21 @@ const wikiStyles = `
 `;
 
 // Helper function to generate cache key for localStorage
-const getCacheKey = (owner: string, repo: string, repoType: string, language: string, isComprehensive: boolean = true): string => {
-  return `deepwiki_cache_${repoType}_${owner}_${repo}_${language}_${isComprehensive ? 'comprehensive' : 'concise'}`;
+const getCacheKey = (
+  owner: string,
+  repo: string,
+  repoType: string,
+  language: string,
+  isComprehensive: boolean = true,
+  branch?: string | null,
+  commit?: string | null
+): string => {
+  const refPart = commit
+    ? `commit_${commit}`
+    : branch
+      ? `branch_${branch}`
+      : 'default';
+  return `deepwiki_cache_${repoType}_${owner}_${repo}_${language}_${isComprehensive ? 'comprehensive' : 'concise'}_${refPart}`;
 };
 
 // Helper function to add tokens and other parameters to request body
@@ -106,7 +119,9 @@ const addTokensToRequestBody = (
   excludedDirs?: string,
   excludedFiles?: string,
   includedDirs?: string,
-  includedFiles?: string
+  includedFiles?: string,
+  branch?: string,
+  commit?: string
 ): void => {
   if (token !== '') {
     requestBody.token = token;
@@ -133,6 +148,13 @@ const addTokensToRequestBody = (
   }
   if (includedFiles) {
     requestBody.included_files = includedFiles;
+  }
+
+  if (branch) {
+    requestBody.branch = branch;
+  }
+  if (commit) {
+    requestBody.commit = commit;
   }
 
 };
@@ -191,6 +213,8 @@ export default function RepoWikiPage() {
   const modelParam = searchParams.get('model') || '';
   const isCustomModelParam = searchParams.get('is_custom_model') === 'true';
   const customModelParam = searchParams.get('custom_model') || '';
+  const branchParam = searchParams.get('branch') || '';
+  const commitParam = searchParams.get('commit') || '';
   const language = searchParams.get('language') || 'en';
   const repoHost = (() => {
     if (!repoUrl) return '';
@@ -219,8 +243,10 @@ export default function RepoWikiPage() {
     type: repoType,
     token: token || null,
     localPath: localPath || null,
-    repoUrl: repoUrl || null
-  }), [owner, repo, repoType, localPath, repoUrl, token]);
+    repoUrl: repoUrl || null,
+    branch: branchParam || null,
+    commit: commitParam || null
+  }), [owner, repo, repoType, localPath, repoUrl, token, branchParam, commitParam]);
 
   // State variables
   const [isLoading, setIsLoading] = useState(true);
@@ -537,7 +563,7 @@ Remember:
         };
 
         // Add tokens if available
-        addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles);
+        addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles, effectiveRepoInfo.branch || undefined, effectiveRepoInfo.commit || undefined);
 
         // Use WebSocket for communication
         let content = '';
@@ -834,7 +860,7 @@ IMPORTANT:
       };
 
       // Add tokens if available
-      addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles);
+      addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles, effectiveRepoInfo.branch || undefined, effectiveRepoInfo.commit || undefined);
 
       // Use WebSocket for communication
       let responseText = '';
@@ -931,7 +957,7 @@ IMPORTANT:
 
       if(responseText.includes('Error preparing retriever: Environment variable OPENAI_API_KEY must be set')) {
          setEmbeddingError(true);
-         throw new Error('OPENAI_API_KEY environment variable is not set. Please configure your OpenAI API key.');
+         throw new Error('No providers are currently available. Please configure a provider key or use a local provider.');
        }
 
        if(responseText.includes('Ollama model') && responseText.includes('not found')) {
@@ -1212,6 +1238,8 @@ IMPORTANT:
         // Try to get the tree data for common branch names
         let treeData = null;
         let apiErrorDetails = '';
+        const selectedBranch = effectiveRepoInfo.branch?.trim() || '';
+        const selectedCommit = effectiveRepoInfo.commit?.trim() || '';
 
         // Determine the GitHub API base URL based on the repository URL
         const getGithubApiUrl = (repoUrl: string | null): string => {
@@ -1248,23 +1276,28 @@ IMPORTANT:
             const repoData = await repoInfoResponse.json();
             defaultBranchLocal = repoData.default_branch;
             console.log(`Found default branch: ${defaultBranchLocal}`);
-            // Store the default branch in state
-            setDefaultBranch(defaultBranchLocal || 'main');
           }
         } catch (err) {
           console.warn('Could not fetch repository info for default branch:', err);
         }
 
-        // Create list of branches to try, prioritizing the actual default branch
-        const branchesToTry = defaultBranchLocal 
-          ? [defaultBranchLocal, 'main', 'master'].filter((branch, index, arr) => arr.indexOf(branch) === index)
-          : ['main', 'master'];
+        const effectiveRef = selectedCommit || selectedBranch || defaultBranchLocal || 'main';
+        setDefaultBranch(effectiveRef);
 
-        for (const branch of branchesToTry) {
-          const apiUrl = `${githubApiBaseUrl}/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
+        // Create list of branches to try, prioritizing the actual default branch
+        const branchesToTry = selectedCommit
+          ? [selectedCommit]
+          : selectedBranch
+            ? [selectedBranch]
+            : defaultBranchLocal
+              ? [defaultBranchLocal, 'main', 'master'].filter((branch, index, arr) => arr.indexOf(branch) === index)
+              : ['main', 'master'];
+
+        for (const ref of branchesToTry) {
+          const apiUrl = `${githubApiBaseUrl}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`;
           const headers = createGithubHeaders(currentToken);
 
-          console.log(`Fetching repository structure from branch: ${branch}`);
+          console.log(`Fetching repository structure from ref: ${ref}`);
           try {
             const response = await fetch(apiUrl, {
               headers
@@ -1280,7 +1313,7 @@ IMPORTANT:
               console.error(`Error fetching repository structure: ${apiErrorDetails}`);
             }
           } catch (err) {
-            console.error(`Network error fetching branch ${branch}:`, err);
+            console.error(`Network error fetching ref ${ref}:`, err);
           }
         }
 
@@ -1301,8 +1334,9 @@ IMPORTANT:
         // Try to fetch README.md content
         try {
           const headers = createGithubHeaders(currentToken);
+          const readmeRef = selectedCommit || selectedBranch || defaultBranchLocal || 'main';
 
-          const readmeResponse = await fetch(`${githubApiBaseUrl}/repos/${owner}/${repo}/readme`, {
+          const readmeResponse = await fetch(`${githubApiBaseUrl}/repos/${owner}/${repo}/readme?ref=${encodeURIComponent(readmeRef)}`, {
             headers
           });
 
@@ -1321,6 +1355,8 @@ IMPORTANT:
         const projectPath = extractUrlPath(effectiveRepoInfo.repoUrl ?? '')?.replace(/\.git$/, '') || `${owner}/${repo}`;
         const projectDomain = extractUrlDomain(effectiveRepoInfo.repoUrl ?? "https://gitlab.com");
         const encodedProjectPath = encodeURIComponent(projectPath);
+        const selectedBranch = effectiveRepoInfo.branch?.trim() || '';
+        const selectedCommit = effectiveRepoInfo.commit?.trim() || '';
 
         const headers = createGitlabHeaders(currentToken);
 
@@ -1347,15 +1383,16 @@ IMPORTANT:
           const projectInfo = await projectInfoRes.json();
           defaultBranchLocal = projectInfo.default_branch || 'main';
           console.log(`Found GitLab default branch: ${defaultBranchLocal}`);
-          // Store the default branch in state
-          setDefaultBranch(defaultBranchLocal);
+          const targetRef = selectedCommit || selectedBranch || defaultBranchLocal;
+          // Store the default branch/ref in state
+          setDefaultBranch(targetRef);
 
           // Step 2: Paginate to fetch full file tree
           let page = 1;
           let morePages = true;
           
           while (morePages) {
-            const apiUrl = `${projectInfoUrl}/repository/tree?recursive=true&per_page=100&page=${page}`;
+            const apiUrl = `${projectInfoUrl}/repository/tree?recursive=true&per_page=100&page=${page}&ref=${encodeURIComponent(targetRef)}`;
             const response = await fetch(apiUrl, { headers });
 
             if (!response.ok) {
@@ -1382,7 +1419,8 @@ IMPORTANT:
           .join('\n');
 
           // Step 4: Try to fetch README.md content
-          const readmeUrl = `${projectInfoUrl}/repository/files/README.md/raw`;
+          const targetRef = selectedCommit || selectedBranch || defaultBranchLocal;
+          const readmeUrl = `${projectInfoUrl}/repository/files/README.md/raw?ref=${encodeURIComponent(targetRef)}`;
             try {
             const readmeResponse = await fetch(readmeUrl, { headers });
               if (readmeResponse.ok) {
@@ -1403,6 +1441,8 @@ IMPORTANT:
         // Bitbucket API approach
         const repoPath = extractUrlPath(effectiveRepoInfo.repoUrl ?? '') ?? `${owner}/${repo}`;
         const encodedRepoPath = encodeURIComponent(repoPath);
+        const selectedBranch = effectiveRepoInfo.branch?.trim() || '';
+        const selectedCommit = effectiveRepoInfo.commit?.trim() || '';
 
         // Try to get the file tree for common branch names
         let filesData = null;
@@ -1420,10 +1460,11 @@ IMPORTANT:
           if (response.ok) {
             const projectData = JSON.parse(responseText);
             defaultBranchLocal = projectData.mainbranch.name;
+            const targetRef = selectedCommit || selectedBranch || defaultBranchLocal;
             // Store the default branch in state
-            setDefaultBranch(defaultBranchLocal);
+            setDefaultBranch(targetRef);
 
-            const apiUrl = `https://api.bitbucket.org/2.0/repositories/${encodedRepoPath}/src/${defaultBranchLocal}/?recursive=true&per_page=100`;
+            const apiUrl = `https://api.bitbucket.org/2.0/repositories/${encodedRepoPath}/src/${encodeURIComponent(targetRef)}/?recursive=true&per_page=100`;
             try {
               const response = await fetch(apiUrl, {
                 headers
@@ -1438,7 +1479,7 @@ IMPORTANT:
                 apiErrorDetails = `Status: ${response.status}, Response: ${errorData}`;
               }
             } catch (err) {
-              console.error(`Network error fetching Bitbucket branch ${defaultBranchLocal}:`, err);
+              console.error(`Network error fetching Bitbucket ref ${targetRef}:`, err);
             }
           } else {
             const errorData = responseText;
@@ -1466,7 +1507,8 @@ IMPORTANT:
         try {
           const headers = createBitbucketHeaders(currentToken);
 
-          const readmeResponse = await fetch(`https://api.bitbucket.org/2.0/repositories/${encodedRepoPath}/src/${defaultBranchLocal}/README.md`, {
+          const readmeRef = selectedCommit || selectedBranch || defaultBranchLocal;
+          const readmeResponse = await fetch(`https://api.bitbucket.org/2.0/repositories/${encodedRepoPath}/src/${encodeURIComponent(readmeRef)}/README.md`, {
             headers
           });
 
@@ -1591,6 +1633,13 @@ IMPORTANT:
         authorization_code: authCode,
       });
 
+      if (effectiveRepoInfo.branch) {
+        params.append('branch', effectiveRepoInfo.branch);
+      }
+      if (effectiveRepoInfo.commit) {
+        params.append('commit', effectiveRepoInfo.commit);
+      }
+
       // Add file filters configuration
       if (modelExcludedDirs) {
         params.append('excluded_dirs', modelExcludedDirs);
@@ -1653,7 +1702,15 @@ IMPORTANT:
     console.log('Refreshing wiki. Server cache will be overwritten upon new generation if not cleared.');
 
     // Clear the localStorage cache (if any remnants or if it was used before this change)
-    const localStorageCacheKey = getCacheKey(effectiveRepoInfo.owner, effectiveRepoInfo.repo, effectiveRepoInfo.type, language, isComprehensiveView);
+    const localStorageCacheKey = getCacheKey(
+      effectiveRepoInfo.owner,
+      effectiveRepoInfo.repo,
+      effectiveRepoInfo.type,
+      language,
+      isComprehensiveView,
+      effectiveRepoInfo.branch,
+      effectiveRepoInfo.commit
+    );
     localStorage.removeItem(localStorageCacheKey);
 
     // Reset cache loaded flag
@@ -1702,6 +1759,13 @@ IMPORTANT:
             language: language,
             comprehensive: isComprehensiveView.toString(),
           });
+
+          if (effectiveRepoInfo.branch) {
+            params.append('branch', effectiveRepoInfo.branch);
+          }
+          if (effectiveRepoInfo.commit) {
+            params.append('commit', effectiveRepoInfo.commit);
+          }
           const response = await fetch(`/api/wiki_cache?${params.toString()}`);
 
           if (response.ok) {
@@ -1928,7 +1992,7 @@ IMPORTANT:
     };
 
     saveCache();
-  }, [isLoading, error, wikiStructure, generatedPages, effectiveRepoInfo.owner, effectiveRepoInfo.repo, effectiveRepoInfo.type, effectiveRepoInfo.repoUrl, repoUrl, language, isComprehensiveView]);
+  }, [isLoading, error, wikiStructure, generatedPages, effectiveRepoInfo.owner, effectiveRepoInfo.repo, effectiveRepoInfo.type, effectiveRepoInfo.repoUrl, effectiveRepoInfo.branch, effectiveRepoInfo.commit, repoUrl, language, isComprehensiveView]);
 
   const handlePageSelect = (pageId: string) => {
     if (currentPageId != pageId) {

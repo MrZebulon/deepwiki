@@ -25,6 +25,8 @@ export interface ChatCompletionRequest {
   filePath?: string;
   token?: string;
   type?: string;
+  branch?: string;
+  commit?: string;
   provider?: string;
   model?: string;
   language?: string;

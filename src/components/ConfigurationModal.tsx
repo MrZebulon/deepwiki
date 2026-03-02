@@ -39,6 +39,12 @@ interface ConfigurationModalProps {
   accessToken: string;
   setAccessToken: (value: string) => void;
 
+  // Repository ref options
+  selectedBranch: string;
+  setSelectedBranch: (value: string) => void;
+  selectedCommit: string;
+  setSelectedCommit: (value: string) => void;
+
   // File filter options
   excludedDirs: string;
   setExcludedDirs: (value: string) => void;
@@ -81,6 +87,10 @@ export default function ConfigurationModal({
   setSelectedPlatform,
   accessToken,
   setAccessToken,
+  selectedBranch,
+  setSelectedBranch,
+  selectedCommit,
+  setSelectedCommit,
   excludedDirs,
   setExcludedDirs,
   excludedFiles,
@@ -241,6 +251,39 @@ export default function ConfigurationModal({
               onToggleTokenSection={() => setShowTokenSection(!showTokenSection)}
               allowPlatformChange={true}
             />
+
+            {/* Repository reference options */}
+            <div className="mb-4 p-4 bg-[var(--background)]/50 rounded-md border border-[var(--border-color)]">
+              <label htmlFor="branch-input" className="block text-sm font-medium text-[var(--foreground)] mb-2">
+                Branch (optional)
+              </label>
+              <input
+                id="branch-input"
+                type="text"
+                value={selectedBranch}
+                onChange={(e) => setSelectedBranch(e.target.value)}
+                className="input-japanese block w-full px-3 py-2 text-sm rounded-md bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                placeholder="e.g. main"
+              />
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                Uses the latest commit from this branch.
+              </p>
+
+              <label htmlFor="commit-input" className="block text-sm font-medium text-[var(--foreground)] mt-4 mb-2">
+                Commit SHA (optional)
+              </label>
+              <input
+                id="commit-input"
+                type="text"
+                value={selectedCommit}
+                onChange={(e) => setSelectedCommit(e.target.value)}
+                className="input-japanese block w-full px-3 py-2 text-sm rounded-md bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+                placeholder="e.g. a1b2c3d4"
+              />
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                If set, commit SHA takes precedence over branch.
+              </p>
+            </div>
 
             {/* Authorization Code Input */}
             {isAuthLoading && (
