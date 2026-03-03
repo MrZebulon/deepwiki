@@ -1,9 +1,9 @@
-import os
 import json
 import logging
-import re
+import shutil
+import importlib.util
 from pathlib import Path
-from typing import List, Union, Dict, Any
+from typing import List, Union, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -15,45 +15,23 @@ from api.azureai_client import AzureAIClient
 from api.dashscope_client import DashscopeClient
 from api.mlx_client import MLXClient
 from adalflow import GoogleGenAIClient, OllamaClient
+from api.runtime_settings import load_runtime_settings, update_runtime_settings
 
-# Get API keys from environment variables
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
-OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
-AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
-AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
-AWS_SESSION_TOKEN = os.environ.get('AWS_SESSION_TOKEN')
-AWS_REGION = os.environ.get('AWS_REGION')
-AWS_ROLE_ARN = os.environ.get('AWS_ROLE_ARN')
+# Runtime settings-backed globals (kept for compatibility with existing imports)
+OPENAI_API_KEY = ""
+GOOGLE_API_KEY = ""
+OPENROUTER_API_KEY = ""
+AWS_ACCESS_KEY_ID = ""
+AWS_SECRET_ACCESS_KEY = ""
+AWS_SESSION_TOKEN = ""
+AWS_REGION = "us-east-1"
+AWS_ROLE_ARN = ""
+WIKI_AUTH_MODE = False
+WIKI_AUTH_CODE = ""
+EMBEDDER_TYPE = "openai"
 
-# Set keys in environment (in case they're needed elsewhere in the code)
-if OPENAI_API_KEY:
-    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-if GOOGLE_API_KEY:
-    os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
-if OPENROUTER_API_KEY:
-    os.environ["OPENROUTER_API_KEY"] = OPENROUTER_API_KEY
-if AWS_ACCESS_KEY_ID:
-    os.environ["AWS_ACCESS_KEY_ID"] = AWS_ACCESS_KEY_ID
-if AWS_SECRET_ACCESS_KEY:
-    os.environ["AWS_SECRET_ACCESS_KEY"] = AWS_SECRET_ACCESS_KEY
-if AWS_SESSION_TOKEN:
-    os.environ["AWS_SESSION_TOKEN"] = AWS_SESSION_TOKEN
-if AWS_REGION:
-    os.environ["AWS_REGION"] = AWS_REGION
-if AWS_ROLE_ARN:
-    os.environ["AWS_ROLE_ARN"] = AWS_ROLE_ARN
-
-# Wiki authentication settings
-raw_auth_mode = os.environ.get('DEEPWIKI_AUTH_MODE', 'False')
-WIKI_AUTH_MODE = raw_auth_mode.lower() in ['true', '1', 't']
-WIKI_AUTH_CODE = os.environ.get('DEEPWIKI_AUTH_CODE', '')
-
-# Embedder settings
-EMBEDDER_TYPE = os.environ.get('DEEPWIKI_EMBEDDER_TYPE', 'openai').lower()
-
-# Get configuration directory from environment variable, or use default if not set
-CONFIG_DIR = os.environ.get('DEEPWIKI_CONFIG_DIR', None)
+# Configuration directory is fixed to repository config folder.
+CONFIG_DIR = None
 
 # Client class mapping
 CLIENT_CLASSES = {
@@ -68,35 +46,168 @@ CLIENT_CLASSES = {
     "MLXClient": MLXClient
 }
 
-def replace_env_placeholders(config: Union[Dict[str, Any], List[Any], str, Any]) -> Union[Dict[str, Any], List[Any], str, Any]:
-    """
-    Recursively replace placeholders like "${ENV_VAR}" in string values
-    within a nested configuration structure (dicts, lists, strings)
-    with environment variable values. Logs a warning if a placeholder is not found.
-    """
-    pattern = re.compile(r"\$\{([A-Z0-9_]+)\}")
 
-    def replacer(match: re.Match[str]) -> str:
-        env_var_name = match.group(1)
-        original_placeholder = match.group(0)
-        env_var_value = os.environ.get(env_var_name)
-        if env_var_value is None:
-            logger.warning(
-                f"Environment variable placeholder '{original_placeholder}' was not found in the environment. "
-                f"The placeholder string will be used as is."
-            )
-            return original_placeholder
-        return env_var_value
+def _get_runtime_settings() -> Dict[str, Any]:
+    return load_runtime_settings()
 
-    if isinstance(config, dict):
-        return {k: replace_env_placeholders(v) for k, v in config.items()}
-    elif isinstance(config, list):
-        return [replace_env_placeholders(item) for item in config]
-    elif isinstance(config, str):
-        return pattern.sub(replacer, config)
-    else:
-        # Handles numbers, booleans, None, etc.
-        return config
+
+def _sync_compatibility_globals() -> None:
+    global OPENAI_API_KEY, GOOGLE_API_KEY, OPENROUTER_API_KEY
+    global AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION, AWS_ROLE_ARN
+    global WIKI_AUTH_MODE, WIKI_AUTH_CODE, EMBEDDER_TYPE
+
+    settings = _get_runtime_settings()
+    provider_keys = settings.get("provider_keys", {})
+
+    openai = provider_keys.get("openai", {})
+    google = provider_keys.get("google", {})
+    openrouter = provider_keys.get("openrouter", {})
+    bedrock = provider_keys.get("bedrock", {})
+    auth = settings.get("auth", {})
+    embedder = settings.get("embedder", {})
+
+    OPENAI_API_KEY = (openai.get("apiKey") or "").strip()
+    GOOGLE_API_KEY = (google.get("apiKey") or "").strip()
+    OPENROUTER_API_KEY = (openrouter.get("apiKey") or "").strip()
+
+    AWS_ACCESS_KEY_ID = (bedrock.get("accessKeyId") or "").strip()
+    AWS_SECRET_ACCESS_KEY = (bedrock.get("secretAccessKey") or "").strip()
+    AWS_SESSION_TOKEN = (bedrock.get("sessionToken") or "").strip()
+    AWS_REGION = (bedrock.get("region") or "us-east-1").strip()
+    AWS_ROLE_ARN = (bedrock.get("roleArn") or "").strip()
+
+    WIKI_AUTH_MODE = bool(auth.get("enabled", False))
+    WIKI_AUTH_CODE = (auth.get("code") or "").strip()
+
+    EMBEDDER_TYPE = (embedder.get("type") or "openai").strip().lower()
+
+
+def get_provider_credentials(provider_id: str) -> Dict[str, Any]:
+    settings = _get_runtime_settings()
+    return settings.get("provider_keys", {}).get(provider_id, {})
+
+
+def has_provider_credentials(provider_id: str) -> bool:
+    provider_id = provider_id.lower()
+    creds = get_provider_credentials(provider_id)
+
+    if provider_id in {"openai", "google", "openrouter", "dashscope"}:
+        return bool((creds.get("apiKey") or "").strip())
+
+    if provider_id == "azure":
+        return bool(
+            (creds.get("apiKey") or "").strip()
+            and (creds.get("endpoint") or "").strip()
+            and (creds.get("apiVersion") or "").strip()
+        )
+
+    if provider_id == "bedrock":
+        has_static = bool(
+            (creds.get("accessKeyId") or "").strip()
+            and (creds.get("secretAccessKey") or "").strip()
+        )
+        has_role_or_profile = bool((creds.get("roleArn") or "").strip() or (creds.get("profile") or "").strip())
+        return has_static or has_role_or_profile
+
+    return True
+
+
+def is_model_provider_available(provider_id: str) -> bool:
+    provider_id = (provider_id or "").strip().lower()
+
+    if provider_id in {"openai", "google", "openrouter", "azure", "dashscope", "bedrock"}:
+        return has_provider_credentials(provider_id)
+
+    if provider_id == "ollama":
+        return shutil.which("ollama") is not None
+
+    if provider_id == "mlx":
+        has_mlx_server_cli = shutil.which("mlx_lm.server") is not None
+        has_mlx_package = importlib.util.find_spec("mlx_lm") is not None
+        return has_mlx_server_cli or has_mlx_package
+
+    # Unknown/custom providers remain available to avoid breaking custom setups.
+    return True
+
+
+def resolve_model_provider(preferred: Optional[str] = None) -> str:
+    configured = (preferred or configs.get("default_provider") or "").strip().lower()
+
+    if configured and is_model_provider_available(configured):
+        return configured
+
+    # Favor local providers first so a fresh install works with no API keys.
+    for fallback in ["ollama", "mlx", "openai", "google", "openrouter", "azure", "dashscope", "bedrock"]:
+        if is_model_provider_available(fallback) and fallback in configs.get("providers", {}):
+            return fallback
+
+    # Last resort: first configured provider in generator config, if any.
+    for provider_id in configs.get("providers", {}).keys():
+        if is_model_provider_available(provider_id):
+            return provider_id
+
+    return configured or (next(iter(configs.get("providers", {}).keys()), ""))
+
+
+def is_embedder_available(embedder_type: str) -> bool:
+    embedder_type = (embedder_type or "").strip().lower()
+
+    if embedder_type in {"openai", "google", "bedrock"}:
+        return has_provider_credentials(embedder_type)
+
+    if embedder_type == "ollama":
+        return shutil.which("ollama") is not None
+
+    if embedder_type == "mlx":
+        has_mlx_server_cli = shutil.which("mlx_lm.server") is not None
+        has_mlx_package = importlib.util.find_spec("mlx_lm") is not None
+        return has_mlx_server_cli or has_mlx_package
+
+    return False
+
+
+def resolve_embedder_type(preferred: Optional[str] = None) -> str:
+    configured = (preferred or _get_runtime_settings().get("embedder", {}).get("type") or "openai").strip().lower()
+
+    supported_types = [
+        "openai",
+        "google",
+        "bedrock",
+        "ollama",
+        "mlx",
+    ]
+
+    if configured in supported_types and is_embedder_available(configured):
+        return configured
+
+    for fallback in ["ollama", "mlx", "openai", "google", "bedrock"]:
+        if is_embedder_available(fallback):
+            return fallback
+
+    # As a last resort, return the configured value to preserve behavior and surface clear runtime errors.
+    return configured or "openai"
+
+
+def get_auth_config() -> Dict[str, Any]:
+    settings = _get_runtime_settings()
+    auth = settings.get("auth", {})
+    return {
+        "enabled": bool(auth.get("enabled", False)),
+        "code": (auth.get("code") or "").strip(),
+    }
+
+
+def get_embedder_preference() -> str:
+    return resolve_embedder_type()
+
+
+def update_runtime_preferences(payload: Dict[str, Any]) -> Dict[str, Any]:
+    updated = update_runtime_settings(payload)
+    _sync_compatibility_globals()
+    return updated
+
+
+_sync_compatibility_globals()
 
 # Load JSON configuration file
 def load_json_config(filename):
@@ -116,7 +227,6 @@ def load_json_config(filename):
 
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
-            config = replace_env_placeholders(config)
             return config
     except Exception as e:
         logger.error(f"Error loading configuration file {filename}: {str(e)}")
@@ -163,14 +273,14 @@ def load_embedder_config():
 
     return embedder_config
 
-def get_embedder_config():
+def get_embedder_config(embedder_type: Optional[str] = None):
     """
     Get the current embedder configuration based on DEEPWIKI_EMBEDDER_TYPE.
 
     Returns:
         dict: The embedder configuration with model_client resolved
     """
-    embedder_type = EMBEDDER_TYPE
+    embedder_type = resolve_embedder_type(embedder_type)
     if embedder_type == 'bedrock' and 'embedder_bedrock' in configs:
         return configs.get("embedder_bedrock", {})
     elif embedder_type == 'google' and 'embedder_google' in configs:
@@ -258,23 +368,14 @@ def is_mlx_embedder():
     client_class = embedder_config.get("client_class", "")
     return client_class == "MLXClient"
 
-def get_embedder_type():
+def get_embedder_type(embedder_type: Optional[str] = None):
     """
     Get the current embedder type based on configuration.
     
     Returns:
         str: 'bedrock', 'ollama', 'google', 'mlx', or 'openai' (default)
     """
-    if is_bedrock_embedder():
-        return 'bedrock'
-    elif is_ollama_embedder():
-        return 'ollama'
-    elif is_google_embedder():
-        return 'google'
-    elif is_mlx_embedder():
-        return 'mlx'
-    else:
-        return 'openai'
+    return resolve_embedder_type(embedder_type)
 
 # Load repository and file filters configuration
 def load_repo_config():

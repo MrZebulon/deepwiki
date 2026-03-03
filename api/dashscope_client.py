@@ -153,16 +153,20 @@ class DashscopeClient(ModelClient):
         Raises:
             ValueError: If API key is not provided
         """
-        api_key = self._api_key or os.getenv(self._env_api_key_name)
-        workspace_id = self._workspace_id or os.getenv(self._env_workspace_id_name)
+        from api.config import get_provider_credentials
+
+        creds = get_provider_credentials("dashscope")
+        api_key = self._api_key or (creds.get("apiKey") or "")
+        workspace_id = self._workspace_id or (creds.get("workspaceId") or "")
+        self.base_url = creds.get("baseUrl") or self.base_url
         
         if not api_key:
             raise ValueError(
-                f"Environment variable {self._env_api_key_name} must be set"
+                "Dashscope API key must be set in Settings"
             )
         
         if not workspace_id:
-            log.warning(f"Environment variable {self._env_workspace_id_name} not set. Some features may not work properly.")
+            log.warning("Dashscope workspace ID not set. Some features may not work properly.")
         
         # For Dashscope, we need to include the workspace ID in the base URL if provided
         base_url = self.base_url

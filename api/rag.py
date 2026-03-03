@@ -2,7 +2,7 @@ import logging
 import weakref
 import re
 from dataclasses import dataclass
-from typing import Any, List, Tuple, Dict
+from typing import Any, List, Tuple, Dict, Optional
 from uuid import uuid4
 
 import adalflow as adal
@@ -154,49 +154,53 @@ class RAG(adal.Component):
     """RAG with one repo.
     If you want to load a new repos, call prepare_retriever(repo_url_or_path) first."""
 
-    def __init__(self, provider="google", model=None, use_s3: bool = False):  # noqa: F841 - use_s3 is kept for compatibility
+    def __init__(self, provider: Optional[str] = None, model=None, embedder_type: Optional[str] = None, embedder_model: Optional[str] = None, use_s3: bool = False):  # noqa: F841 - use_s3 is kept for compatibility
         """
         Initialize the RAG component.
 
         Args:
-            provider: Model provider to use (google, openai, openrouter, ollama)
+            provider: Model provider to use. If omitted/unavailable, runtime selects an available provider.
             model: Model name to use with the provider
+            embedder_type: Embedder provider to use for this repository (openai, google, bedrock, ollama, mlx)
+            embedder_model: Optional embedding model name override for this repository
             use_s3: Whether to use S3 for database storage (default: False)
         """
         super().__init__()
 
-        self.provider = provider
+        from api.config import resolve_model_provider
+        self.provider = resolve_model_provider(provider)
         self.model = model
+        self.embedder_model = embedder_model
 
         # Import the helper functions
         from api.config import get_embedder_config, get_embedder_type
 
         # Determine embedder type based on current configuration
-        self.embedder_type = get_embedder_type()
+        self.embedder_type = get_embedder_type(embedder_type)
         self.is_ollama_embedder = (self.embedder_type == 'ollama')  # Backward compatibility
         self.is_mlx_embedder = (self.embedder_type == 'mlx')
 
         # Check if Ollama model exists before proceeding
+        embedder_config = get_embedder_config(self.embedder_type)
+        resolved_embedder_model = self.embedder_model or embedder_config.get("model_kwargs", {}).get("model")
+
         if self.is_ollama_embedder:
             from api.ollama_patch import check_ollama_model_exists
-            from api.config import get_embedder_config
-            
-            embedder_config = get_embedder_config()
-            if embedder_config and embedder_config.get("model_kwargs", {}).get("model"):
-                model_name = embedder_config["model_kwargs"]["model"]
-                if not check_ollama_model_exists(model_name):
-                    raise Exception(f"Ollama model '{model_name}' not found. Please run 'ollama pull {model_name}' to install it.")
+            if resolved_embedder_model and not check_ollama_model_exists(resolved_embedder_model):
+                raise Exception(f"Ollama model '{resolved_embedder_model}' not found. Please run 'ollama pull {resolved_embedder_model}' to install it.")
 
         # Check if MLX server is reachable before proceeding
         if self.is_mlx_embedder:
-            from api.mlx_client import check_mlx_server_running
-            
+            from api.mlx_client import check_mlx_server_running, check_mlx_model_exists
+
             if not check_mlx_server_running():
                 raise Exception("MLX LM server is not reachable. Please start it with 'mlx_lm.server --model <model_name>' first.")
+            if resolved_embedder_model and not check_mlx_model_exists(resolved_embedder_model):
+                raise Exception(f"MLX model '{resolved_embedder_model}' not found on the MLX server. Please start mlx_lm.server with that model first.")
 
         # Initialize components
         self.memory = Memory()
-        self.embedder = get_embedder(embedder_type=self.embedder_type)
+        self.embedder = get_embedder(embedder_type=self.embedder_type, embedder_model=self.embedder_model)
 
         self_weakref = weakref.ref(self)
         # Patch: ensure query embedding is always single string for Ollama

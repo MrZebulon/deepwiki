@@ -5,42 +5,12 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { FaWikipediaW, FaGithub, FaCoffee, FaTwitter } from 'react-icons/fa';
 import ThemeToggle from '@/components/theme-toggle';
-import Mermaid from '../components/Mermaid';
 import ConfigurationModal from '@/components/ConfigurationModal';
 import ProcessedProjects from '@/components/ProcessedProjects';
 import { extractUrlPath, extractUrlDomain } from '@/utils/urlDecoder';
 import { useProcessedProjects } from '@/hooks/useProcessedProjects';
 
 import { useLanguage } from '@/contexts/LanguageContext';
-
-// Define the demo mermaid charts outside the component
-const DEMO_FLOW_CHART = `graph TD
-  A[Code Repository] --> B[DeepWiki]
-  B --> C[Architecture Diagrams]
-  B --> D[Component Relationships]
-  B --> E[Data Flow]
-  B --> F[Process Workflows]
-
-  style A fill:#f9d3a9,stroke:#d86c1f
-  style B fill:#d4a9f9,stroke:#6c1fd8
-  style C fill:#a9f9d3,stroke:#1fd86c
-  style D fill:#a9d3f9,stroke:#1f6cd8
-  style E fill:#f9a9d3,stroke:#d81f6c
-  style F fill:#d3f9a9,stroke:#6cd81f`;
-
-const DEMO_SEQUENCE_CHART = `sequenceDiagram
-  participant User
-  participant DeepWiki
-  participant GitHub
-
-  User->>DeepWiki: Enter repository URL
-  DeepWiki->>GitHub: Request repository data
-  GitHub-->>DeepWiki: Return repository data
-  DeepWiki->>DeepWiki: Process and analyze code
-  DeepWiki-->>User: Display wiki with diagrams
-
-  %% Add a note to make text more visible
-  Note over User,GitHub: DeepWiki supports sequence diagrams for visualizing interactions`;
 
 export default function Home() {
   const router = useRouter();
@@ -93,6 +63,8 @@ export default function Home() {
           setModel(config.model || '');
           setIsCustomModel(config.isCustomModel || false);
           setCustomModel(config.customModel || '');
+          setEmbedderProvider(config.embedderProvider || '');
+          setEmbedderModel(config.embedderModel || '');
           setSelectedPlatform(config.selectedPlatform || 'github');
           setSelectedBranch(config.selectedBranch || '');
           setSelectedCommit(config.selectedCommit || '');
@@ -128,6 +100,8 @@ export default function Home() {
   const [model, setModel] = useState<string>('');
   const [isCustomModel, setIsCustomModel] = useState<boolean>(false);
   const [customModel, setCustomModel] = useState<string>('');
+  const [embedderProvider, setEmbedderProvider] = useState<string>('');
+  const [embedderModel, setEmbedderModel] = useState<string>('');
 
   // Wiki type state - default to comprehensive view
   const [isComprehensiveView, setIsComprehensiveView] = useState<boolean>(true);
@@ -321,6 +295,8 @@ export default function Home() {
           model,
           isCustomModel,
           customModel,
+          embedderProvider,
+          embedderModel,
           selectedPlatform,
           selectedBranch,
           selectedCommit,
@@ -373,6 +349,12 @@ export default function Home() {
     // Add model parameters
     params.append('provider', provider);
     params.append('model', model);
+    if (embedderProvider) {
+      params.append('embedder_provider', embedderProvider);
+    }
+    if (embedderModel) {
+      params.append('embedder_model', embedderModel);
+    }
     if (isCustomModel && customModel) {
       params.append('custom_model', customModel);
     }
@@ -404,240 +386,193 @@ export default function Home() {
     // The isSubmitting state will be reset when the component unmounts during navigation
   };
 
+  const quickExamples = [
+    'https://github.com/AsyncFuncAI/deepwiki-open',
+    'https://gitlab.com/gitlab-org/gitlab',
+    'AsyncFuncAI/deepwiki-open',
+    'https://bitbucket.org/atlassian/atlaskit',
+  ];
+
   return (
-    <div className="h-screen paper-texture p-4 md:p-8 flex flex-col">
-      <header className="max-w-6xl mx-auto mb-6 h-fit w-full">
-        <div
-          className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-[var(--card-bg)] rounded-lg shadow-custom border border-[var(--border-color)] p-4">
-          <div className="flex items-center">
-            <div className="bg-[var(--accent-primary)] p-2 rounded-lg mr-3">
-              <FaWikipediaW className="text-2xl text-white" />
-            </div>
-            <div className="mr-6">
-              <h1 className="text-xl md:text-2xl font-bold text-[var(--accent-primary)]">{t('common.appName')}</h1>
-              <div className="flex flex-wrap items-baseline gap-x-2 md:gap-x-3 mt-0.5">
-                <p className="text-xs text-[var(--muted)] whitespace-nowrap">{t('common.tagline')}</p>
-                <div className="hidden md:inline-block">
-                  <Link href="/wiki/projects"
-                    className="text-xs font-medium text-[var(--accent-primary)] hover:text-[var(--highlight)] hover:underline whitespace-nowrap">
-                    {t('nav.wikiProjects')}
-                  </Link>
-                </div>
+    <div className="min-h-screen paper-texture px-4 py-5 md:px-8 md:py-7">
+      <div className="max-w-6xl mx-auto flex flex-col gap-6">
+        <header className="w-full">
+          <div className="flex items-center justify-between bg-[var(--card-bg)]/95 rounded-2xl border border-[var(--border-color)] shadow-custom px-4 py-3 md:px-5">
+            <div className="flex items-center gap-3">
+              <div className="bg-[var(--accent-primary)] p-2 rounded-lg">
+                <FaWikipediaW className="text-xl text-white" />
+              </div>
+              <div>
+                <h1 className="text-lg md:text-xl font-bold text-[var(--foreground)]">{t('common.appName')}</h1>
+                <p className="text-xs text-[var(--muted)]">{t('common.tagline')}</p>
               </div>
             </div>
-          </div>
 
-          <form onSubmit={handleFormSubmit} className="flex flex-col gap-3 w-full max-w-3xl">
-            {/* Repository URL input and submit button */}
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  value={repositoryInput}
-                  onChange={handleRepositoryInputChange}
-                  placeholder={t('form.repoPlaceholder') || "owner/repo, GitHub/GitLab/BitBucket URL, or local folder path"}
-                  className="input-japanese block w-full pl-10 pr-3 py-2.5 border-[var(--border-color)] rounded-lg bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
-                />
+            <div className="flex items-center gap-4">
+              <Link href="/wiki/projects" className="text-sm text-[var(--accent-primary)] hover:underline">
+                {t('nav.wikiProjects')}
+              </Link>
+              <Link href="/settings" className="text-sm text-[var(--accent-primary)] hover:underline">
+                Settings
+              </Link>
+              <ThemeToggle />
+            </div>
+          </div>
+        </header>
+
+        <main className="w-full flex flex-col gap-6">
+          <section className="bg-[var(--card-bg)] rounded-2xl border border-[var(--border-color)] shadow-custom px-5 py-8 md:px-10 md:py-12">
+            <div className="max-w-4xl mx-auto text-center">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--accent-primary)]/10 border border-[var(--accent-primary)]/20 text-xs text-[var(--accent-primary)] mb-5">
+                AI Wiki for Code Repositories
+              </div>
+
+              <h2 className="text-3xl md:text-5xl font-bold tracking-tight text-[var(--foreground)] mb-4">
+                Understand any codebase in minutes.
+              </h2>
+              <p className="text-sm md:text-base text-[var(--muted)] max-w-2xl mx-auto mb-8 leading-relaxed">
+                {t('home.description')}
+              </p>
+
+              <form onSubmit={handleFormSubmit} className="w-full max-w-3xl mx-auto">
+                <div className="flex flex-col md:flex-row gap-3 md:items-center">
+                  <input
+                    type="text"
+                    value={repositoryInput}
+                    onChange={handleRepositoryInputChange}
+                    placeholder={t('form.repoPlaceholder') || 'owner/repo, GitHub/GitLab/BitBucket URL, or local folder path'}
+                    className="input-japanese flex-1 px-4 py-3 rounded-xl border-[var(--border-color)] bg-[var(--background)]/60 text-[var(--foreground)] focus:border-[var(--accent-primary)]"
+                  />
+                  <button
+                    type="submit"
+                    className="btn-japanese px-7 py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? t('common.processing') : t('common.generateWiki')}
+                  </button>
+                </div>
                 {error && (
-                  <div className="text-[var(--highlight)] text-xs mt-1">
-                    {error}
-                  </div>
+                  <p className="text-left text-[var(--highlight)] text-xs mt-2">{error}</p>
                 )}
+              </form>
+
+              <div className="mt-6 text-left max-w-3xl mx-auto">
+                <p className="text-xs text-[var(--muted)] mb-2">{t('home.enterRepoUrl')}</p>
+                <div className="flex flex-wrap gap-2">
+                  {quickExamples.map((example) => (
+                    <button
+                      key={example}
+                      type="button"
+                      onClick={() => {
+                        setRepositoryInput(example);
+                        loadConfigFromCache(example);
+                      }}
+                      className="px-3 py-1.5 text-xs rounded-full border border-[var(--border-color)] bg-[var(--background)]/70 text-[var(--foreground)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] transition-colors"
+                    >
+                      {example}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <button
-                type="submit"
-                className="btn-japanese px-6 py-2.5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? t('common.processing') : t('common.generateWiki')}
-              </button>
             </div>
-          </form>
+          </section>
 
-          {/* Configuration Modal */}
-          <ConfigurationModal
-            isOpen={isConfigModalOpen}
-            onClose={() => setIsConfigModalOpen(false)}
-            repositoryInput={repositoryInput}
-            selectedLanguage={selectedLanguage}
-            setSelectedLanguage={setSelectedLanguage}
-            supportedLanguages={supportedLanguages}
-            isComprehensiveView={isComprehensiveView}
-            setIsComprehensiveView={setIsComprehensiveView}
-            provider={provider}
-            setProvider={setProvider}
-            model={model}
-            setModel={setModel}
-            isCustomModel={isCustomModel}
-            setIsCustomModel={setIsCustomModel}
-            customModel={customModel}
-            setCustomModel={setCustomModel}
-            selectedPlatform={selectedPlatform}
-            setSelectedPlatform={setSelectedPlatform}
-            accessToken={accessToken}
-            setAccessToken={setAccessToken}
-            selectedBranch={selectedBranch}
-            setSelectedBranch={setSelectedBranch}
-            selectedCommit={selectedCommit}
-            setSelectedCommit={setSelectedCommit}
-            excludedDirs={excludedDirs}
-            setExcludedDirs={setExcludedDirs}
-            excludedFiles={excludedFiles}
-            setExcludedFiles={setExcludedFiles}
-            includedDirs={includedDirs}
-            setIncludedDirs={setIncludedDirs}
-            includedFiles={includedFiles}
-            setIncludedFiles={setIncludedFiles}
-            onSubmit={handleGenerateWiki}
-            isSubmitting={isSubmitting}
-            authRequired={authRequired}
-            authCode={authCode}
-            setAuthCode={setAuthCode}
-            isAuthLoading={isAuthLoading}
-          />
-
-        </div>
-      </header>
-
-      <main className="flex-1 max-w-6xl mx-auto w-full overflow-y-auto">
-        <div
-          className="min-h-full flex flex-col items-center p-8 pt-10 bg-[var(--card-bg)] rounded-lg shadow-custom card-japanese">
-
-          {/* Conditionally show processed projects or welcome content */}
           {!projectsLoading && projects.length > 0 ? (
-            <div className="w-full">
-              {/* Header section for existing projects */}
-              <div className="flex flex-col items-center w-full max-w-2xl mb-8 mx-auto">
-                <div className="flex flex-col sm:flex-row items-center mb-6 gap-4">
-                  <div className="relative">
-                    <div className="absolute -inset-1 bg-[var(--accent-primary)]/20 rounded-full blur-md"></div>
-                    <FaWikipediaW className="text-5xl text-[var(--accent-primary)] relative z-10" />
-                  </div>
-                  <div className="text-center sm:text-left">
-                    <h2 className="text-2xl font-bold text-[var(--foreground)] font-serif mb-1">{t('projects.existingProjects')}</h2>
-                    <p className="text-[var(--accent-primary)] text-sm max-w-md">{t('projects.browseExisting')}</p>
-                  </div>
+            <section className="bg-[var(--card-bg)] rounded-2xl border border-[var(--border-color)] shadow-custom p-5 md:p-7">
+              <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-5">
+                <div>
+                  <h3 className="text-xl font-semibold text-[var(--foreground)]">{t('projects.existingProjects')}</h3>
+                  <p className="text-sm text-[var(--muted)]">{t('projects.browseExisting')}</p>
                 </div>
+                <Link href="/wiki/projects" className="text-sm text-[var(--accent-primary)] hover:underline">
+                  {t('nav.wikiProjects')}
+                </Link>
               </div>
-
-              {/* Show processed projects */}
-              <ProcessedProjects
-                showHeader={false}
-                maxItems={6}
-                messages={messages}
-                className="w-full"
-              />
-            </div>
+              <ProcessedProjects showHeader={false} maxItems={6} messages={messages} className="w-full" />
+            </section>
           ) : (
-            <>
-              {/* Header section */}
-              <div className="flex flex-col items-center w-full max-w-2xl mb-8">
-                <div className="flex flex-col sm:flex-row items-center mb-6 gap-4">
-                  <div className="relative">
-                    <div className="absolute -inset-1 bg-[var(--accent-primary)]/20 rounded-full blur-md"></div>
-                    <FaWikipediaW className="text-5xl text-[var(--accent-primary)] relative z-10" />
-                  </div>
-                  <div className="text-center sm:text-left">
-                    <h2 className="text-2xl font-bold text-[var(--foreground)] font-serif mb-1">{t('home.welcome')}</h2>
-                    <p className="text-[var(--accent-primary)] text-sm max-w-md">{t('home.welcomeTagline')}</p>
-                  </div>
-                </div>
-
-                <p className="text-[var(--foreground)] text-center mb-8 text-lg leading-relaxed">
-                  {t('home.description')}
-                </p>
+            <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-[var(--card-bg)] rounded-xl border border-[var(--border-color)] shadow-custom p-5">
+                <p className="text-xs text-[var(--accent-primary)] mb-2">01</p>
+                <h3 className="text-base font-semibold text-[var(--foreground)] mb-2">Paste repository URL</h3>
+                <p className="text-sm text-[var(--muted)]">GitHub, GitLab, Bitbucket, and local paths are supported.</p>
               </div>
-
-          {/* Quick Start section - redesigned for better spacing */}
-          <div
-            className="w-full max-w-2xl mb-10 bg-[var(--accent-primary)]/5 border border-[var(--accent-primary)]/20 rounded-lg p-5">
-            <h3 className="text-sm font-semibold text-[var(--accent-primary)] mb-3 flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24"
-                stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              {t('home.quickStart')}
-            </h3>
-            <p className="text-sm text-[var(--foreground)] mb-3">{t('home.enterRepoUrl')}</p>
-            <div className="grid grid-cols-1 gap-3 text-xs text-[var(--muted)]">
-              <div
-                className="bg-[var(--background)]/70 p-3 rounded border border-[var(--border-color)] font-mono overflow-x-hidden whitespace-nowrap"
-              >https://github.com/AsyncFuncAI/deepwiki-open
+              <div className="bg-[var(--card-bg)] rounded-xl border border-[var(--border-color)] shadow-custom p-5">
+                <p className="text-xs text-[var(--accent-primary)] mb-2">02</p>
+                <h3 className="text-base font-semibold text-[var(--foreground)] mb-2">Pick your model</h3>
+                <p className="text-sm text-[var(--muted)]">Configure provider, model, language, and optional file filters.</p>
               </div>
-              <div
-                className="bg-[var(--background)]/70 p-3 rounded border border-[var(--border-color)] font-mono overflow-x-hidden whitespace-nowrap"
-              >https://gitlab.com/gitlab-org/gitlab
+              <div className="bg-[var(--card-bg)] rounded-xl border border-[var(--border-color)] shadow-custom p-5">
+                <p className="text-xs text-[var(--accent-primary)] mb-2">03</p>
+                <h3 className="text-base font-semibold text-[var(--foreground)] mb-2">Explore generated wiki</h3>
+                <p className="text-sm text-[var(--muted)]">Review pages, diagrams, and ask follow-up questions about code.</p>
               </div>
-              <div
-                className="bg-[var(--background)]/70 p-3 rounded border border-[var(--border-color)] font-mono overflow-x-hidden whitespace-nowrap"
-              >AsyncFuncAI/deepwiki-open
-              </div>
-              <div
-                className="bg-[var(--background)]/70 p-3 rounded border border-[var(--border-color)] font-mono overflow-x-hidden whitespace-nowrap"
-              >https://bitbucket.org/atlassian/atlaskit
-              </div>
-            </div>
-          </div>
-
-          {/* Visualization section - improved for better visibility */}
-          <div
-            className="w-full max-w-2xl mb-8 bg-[var(--background)]/70 rounded-lg p-6 border border-[var(--border-color)]">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-4">
-              <svg xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5 text-[var(--accent-primary)] flex-shrink-0 mt-0.5 sm:mt-0" fill="none"
-                viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-              </svg>
-              <h3 className="text-base font-semibold text-[var(--foreground)] font-serif">{t('home.advancedVisualization')}</h3>
-            </div>
-            <p className="text-sm text-[var(--foreground)] mb-5 leading-relaxed">
-              {t('home.diagramDescription')}
-            </p>
-
-            {/* Diagrams with improved layout */}
-            <div className="grid grid-cols-1 gap-6">
-              <div className="bg-[var(--card-bg)] p-4 rounded-lg border border-[var(--border-color)] shadow-custom">
-                <h4 className="text-sm font-medium text-[var(--foreground)] mb-3 font-serif">{t('home.flowDiagram')}</h4>
-                <Mermaid chart={DEMO_FLOW_CHART} />
-              </div>
-
-              <div className="bg-[var(--card-bg)] p-4 rounded-lg border border-[var(--border-color)] shadow-custom">
-                <h4 className="text-sm font-medium text-[var(--foreground)] mb-3 font-serif">{t('home.sequenceDiagram')}</h4>
-                <Mermaid chart={DEMO_SEQUENCE_CHART} />
-              </div>
-            </div>
-          </div>
-            </>
+            </section>
           )}
-        </div>
-      </main>
+        </main>
 
-      <footer className="max-w-6xl mx-auto mt-8 flex flex-col gap-4 w-full">
-        <div
-          className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-[var(--card-bg)] rounded-lg p-4 border border-[var(--border-color)] shadow-custom">
-          <p className="text-[var(--muted)] text-sm font-serif">{t('footer.copyright')}</p>
-
-          <div className="flex items-center gap-6">
-            <div className="flex items-center space-x-5">
-              <a href="https://github.com/AsyncFuncAI/deepwiki-open" target="_blank" rel="noopener noreferrer"
-                className="text-[var(--muted)] hover:text-[var(--accent-primary)] transition-colors">
+        <footer className="w-full">
+          <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-[var(--card-bg)] rounded-2xl p-4 border border-[var(--border-color)] shadow-custom">
+            <p className="text-[var(--muted)] text-sm">{t('footer.copyright')}</p>
+            <div className="flex items-center gap-5">
+              <a href="https://github.com/AsyncFuncAI/deepwiki-open" target="_blank" rel="noopener noreferrer" className="text-[var(--muted)] hover:text-[var(--accent-primary)] transition-colors">
                 <FaGithub className="text-xl" />
               </a>
-              <a href="https://buymeacoffee.com/sheing" target="_blank" rel="noopener noreferrer"
-                className="text-[var(--muted)] hover:text-[var(--accent-primary)] transition-colors">
+              <a href="https://buymeacoffee.com/sheing" target="_blank" rel="noopener noreferrer" className="text-[var(--muted)] hover:text-[var(--accent-primary)] transition-colors">
                 <FaCoffee className="text-xl" />
               </a>
-              <a href="https://x.com/sashimikun_void" target="_blank" rel="noopener noreferrer"
-                className="text-[var(--muted)] hover:text-[var(--accent-primary)] transition-colors">
+              <a href="https://x.com/sashimikun_void" target="_blank" rel="noopener noreferrer" className="text-[var(--muted)] hover:text-[var(--accent-primary)] transition-colors">
                 <FaTwitter className="text-xl" />
               </a>
             </div>
-            <ThemeToggle />
           </div>
-        </div>
-      </footer>
+        </footer>
+
+        <ConfigurationModal
+          isOpen={isConfigModalOpen}
+          onClose={() => setIsConfigModalOpen(false)}
+          repositoryInput={repositoryInput}
+          selectedLanguage={selectedLanguage}
+          setSelectedLanguage={setSelectedLanguage}
+          supportedLanguages={supportedLanguages}
+          isComprehensiveView={isComprehensiveView}
+          setIsComprehensiveView={setIsComprehensiveView}
+          provider={provider}
+          setProvider={setProvider}
+          model={model}
+          setModel={setModel}
+          isCustomModel={isCustomModel}
+          setIsCustomModel={setIsCustomModel}
+          customModel={customModel}
+          setCustomModel={setCustomModel}
+          embedderProvider={embedderProvider}
+          setEmbedderProvider={setEmbedderProvider}
+          embedderModel={embedderModel}
+          setEmbedderModel={setEmbedderModel}
+          selectedPlatform={selectedPlatform}
+          setSelectedPlatform={setSelectedPlatform}
+          accessToken={accessToken}
+          setAccessToken={setAccessToken}
+          selectedBranch={selectedBranch}
+          setSelectedBranch={setSelectedBranch}
+          selectedCommit={selectedCommit}
+          setSelectedCommit={setSelectedCommit}
+          excludedDirs={excludedDirs}
+          setExcludedDirs={setExcludedDirs}
+          excludedFiles={excludedFiles}
+          setExcludedFiles={setExcludedFiles}
+          includedDirs={includedDirs}
+          setIncludedDirs={setIncludedDirs}
+          includedFiles={includedFiles}
+          setIncludedFiles={setIncludedFiles}
+          onSubmit={handleGenerateWiki}
+          isSubmitting={isSubmitting}
+          authRequired={authRequired}
+          authCode={authCode}
+          setAuthCode={setAuthCode}
+          isAuthLoading={isAuthLoading}
+        />
+      </div>
     </div>
   );
 }

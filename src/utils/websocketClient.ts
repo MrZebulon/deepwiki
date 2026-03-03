@@ -29,6 +29,7 @@ export interface ChatCompletionRequest {
   commit?: string;
   provider?: string;
   model?: string;
+  embedder_provider?: string;
   language?: string;
   excluded_dirs?: string;
   excluded_files?: string;

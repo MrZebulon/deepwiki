@@ -1,15 +1,23 @@
 import adalflow as adal
+from copy import deepcopy
+from typing import Optional
 
 from api.config import configs, get_embedder_type
 
 
-def get_embedder(is_local_ollama: bool = False, use_google_embedder: bool = False, embedder_type: str = None) -> adal.Embedder:
+def get_embedder(
+    is_local_ollama: bool = False,
+    use_google_embedder: bool = False,
+    embedder_type: Optional[str] = None,
+    embedder_model: Optional[str] = None,
+) -> adal.Embedder:
     """Get embedder based on configuration or parameters.
     
     Args:
         is_local_ollama: Legacy parameter for Ollama embedder
         use_google_embedder: Legacy parameter for Google embedder  
         embedder_type: Direct specification of embedder type ('ollama', 'google', 'bedrock', 'mlx', 'openai')
+        embedder_model: Optional embedding model override for the selected embedder type
     
     Returns:
         adal.Embedder: Configured embedder instance
@@ -43,6 +51,13 @@ def get_embedder(is_local_ollama: bool = False, use_google_embedder: bool = Fals
             embedder_config = configs["embedder_mlx"]
         else:
             embedder_config = configs["embedder"]
+
+    # Apply optional per-request embedder model override
+    if embedder_model and isinstance(embedder_config, dict):
+        embedder_config = deepcopy(embedder_config)
+        model_kwargs = embedder_config.get("model_kwargs")
+        if isinstance(model_kwargs, dict):
+            model_kwargs["model"] = embedder_model
 
     # --- Initialize Embedder ---
     model_client_class = embedder_config["model_client"]

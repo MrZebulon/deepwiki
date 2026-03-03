@@ -68,7 +68,13 @@ class GoogleEmbedderClient(ModelClient):
 
     def _initialize_client(self):
         """Initialize the Google AI client with API key."""
-        api_key = self._api_key or os.getenv(self._env_api_key_name)
+        if self._api_key:
+            api_key = self._api_key
+        elif self._env_api_key_name == "GOOGLE_API_KEY":
+            from api.config import get_provider_credentials
+            api_key = (get_provider_credentials("google").get("apiKey") or "").strip()
+        else:
+            api_key = os.getenv(self._env_api_key_name)
         if not api_key:
             raise ValueError(
                 f"Environment variable {self._env_api_key_name} must be set"

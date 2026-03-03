@@ -12,10 +12,8 @@ from pydantic import BaseModel, Field
 from api.config import (
     get_model_config,
     configs,
-    OPENROUTER_API_KEY,
-    OPENAI_API_KEY,
-    AWS_ACCESS_KEY_ID,
-    AWS_SECRET_ACCESS_KEY,
+    has_provider_credentials,
+    resolve_model_provider,
 )
 from api.data_pipeline import count_tokens, get_file_content
 from api.bedrock_client import BedrockClient
@@ -52,10 +50,12 @@ class ChatCompletionRequest(BaseModel):
 
     # model parameters
     provider: str = Field(
-        "google",
+        default_factory=resolve_model_provider,
         description="Model provider (google, openai, openrouter, ollama, bedrock, azure, dashscope, mlx)",
     )
     model: Optional[str] = Field(None, description="Model name for the specified provider")
+    embedder_provider: Optional[str] = Field(None, description="Embedder provider (openai, google, bedrock, ollama, mlx)")
+    embedder_model: Optional[str] = Field(None, description="Embedding model name for the selected embedder provider")
 
     language: Optional[str] = Field("en", description="Language for content generation (e.g., 'en', 'ja', 'zh', 'es', 'kr', 'vi')")
     excluded_dirs: Optional[str] = Field(None, description="Comma-separated list of directories to exclude from processing")
@@ -88,7 +88,12 @@ async def handle_websocket_chat(websocket: WebSocket):
 
         # Create a new RAG instance for this request
         try:
-            request_rag = RAG(provider=request.provider, model=request.model)
+            request_rag = RAG(
+                provider=request.provider,
+                model=request.model,
+                embedder_type=request.embedder_provider,
+                embedder_model=request.embedder_model,
+            )
 
             # Extract custom file filter parameters if provided
             excluded_dirs = None
@@ -475,8 +480,8 @@ This file contains...
             logger.info(f"Using OpenRouter with model: {request.model}")
 
             # Check if OpenRouter API key is set
-            if not OPENROUTER_API_KEY:
-                logger.warning("OPENROUTER_API_KEY not configured, but continuing with request")
+            if not has_provider_credentials("openrouter"):
+                logger.warning("OpenRouter API key not configured, but continuing with request")
                 # We'll let the OpenRouterClient handle this and return a friendly error message
 
             model = OpenRouterClient()
@@ -498,8 +503,8 @@ This file contains...
             logger.info(f"Using Openai protocol with model: {request.model}")
 
             # Check if an API key is set for Openai
-            if not OPENAI_API_KEY:
-                logger.warning("OPENAI_API_KEY not configured, but continuing with request")
+            if not has_provider_credentials("openai"):
+                logger.warning("OpenAI API key not configured, but continuing with request")
                 # We'll let the OpenAIClient handle this and return an error message
 
             # Initialize Openai client
@@ -521,9 +526,9 @@ This file contains...
         elif request.provider == "bedrock":
             logger.info(f"Using AWS Bedrock with model: {request.model}")
 
-            if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+            if not has_provider_credentials("bedrock"):
                 logger.warning(
-                    "AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY not configured, but continuing with request")
+                    "AWS Bedrock credentials not configured, but continuing with request")
 
             model = BedrockClient()
             model_kwargs = {
@@ -644,7 +649,7 @@ This file contains...
                     await websocket.close()
                 except Exception as e_openrouter:
                     logger.error(f"Error with OpenRouter API: {str(e_openrouter)}")
-                    error_msg = f"\nError with OpenRouter API: {str(e_openrouter)}\n\nPlease check that you have set the OPENROUTER_API_KEY environment variable with a valid API key."
+                    error_msg = f"\nError with OpenRouter API: {str(e_openrouter)}\n\nPlease check your OpenRouter API key in Settings."
                     await websocket.send_text(error_msg)
                     # Close the WebSocket connection after sending the error message
                     await websocket.close()
@@ -666,7 +671,7 @@ This file contains...
                     await websocket.close()
                 except Exception as e_openai:
                     logger.error(f"Error with Openai API: {str(e_openai)}")
-                    error_msg = f"\nError with Openai API: {str(e_openai)}\n\nPlease check that you have set the OPENAI_API_KEY environment variable with a valid API key."
+                    error_msg = f"\nError with Openai API: {str(e_openai)}\n\nPlease check your OpenAI API key in Settings."
                     await websocket.send_text(error_msg)
                     # Close the WebSocket connection after sending the error message
                     await websocket.close()
@@ -683,8 +688,7 @@ This file contains...
                     logger.error(f"Error with AWS Bedrock API: {str(e_bedrock)}")
                     error_msg = (
                         f"\nError with AWS Bedrock API: {str(e_bedrock)}\n\n"
-                        "Please check that you have set the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY "
-                        "environment variables with valid credentials."
+                        "Please check your AWS Bedrock credentials in Settings."
                     )
                     await websocket.send_text(error_msg)
                     await websocket.close()
@@ -706,7 +710,7 @@ This file contains...
                     await websocket.close()
                 except Exception as e_azure:
                     logger.error(f"Error with Azure AI API: {str(e_azure)}")
-                    error_msg = f"\nError with Azure AI API: {str(e_azure)}\n\nPlease check that you have set the AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, and AZURE_OPENAI_VERSION environment variables with valid values."
+                    error_msg = f"\nError with Azure AI API: {str(e_azure)}\n\nPlease check your Azure settings (API key, endpoint, version) in Settings."
                     await websocket.send_text(error_msg)
                     # Close the WebSocket connection after sending the error message
                     await websocket.close()
@@ -728,8 +732,7 @@ This file contains...
                     logger.error(f"Error with Dashscope API: {str(e_dashscope)}")
                     error_msg = (
                         f"\nError with Dashscope API: {str(e_dashscope)}\n\n"
-                        "Please check that you have set the DASHSCOPE_API_KEY (and optionally "
-                        "DASHSCOPE_WORKSPACE_ID) environment variables with valid values."
+                        "Please check your Dashscope settings (API key and optional workspace ID) in Settings."
                     )
                     await websocket.send_text(error_msg)
                     # Close the WebSocket connection after sending the error message
@@ -819,7 +822,7 @@ This file contains...
                                 await websocket.send_text(chunk)
                         except Exception as e_fallback:
                             logger.error(f"Error with OpenRouter API fallback: {str(e_fallback)}")
-                            error_msg = f"\nError with OpenRouter API fallback: {str(e_fallback)}\n\nPlease check that you have set the OPENROUTER_API_KEY environment variable with a valid API key."
+                            error_msg = f"\nError with OpenRouter API fallback: {str(e_fallback)}\n\nPlease check your OpenRouter API key in Settings."
                             await websocket.send_text(error_msg)
                     elif request.provider == "openai":
                         try:
@@ -840,7 +843,7 @@ This file contains...
                                 await websocket.send_text(text)
                         except Exception as e_fallback:
                             logger.error(f"Error with Openai API fallback: {str(e_fallback)}")
-                            error_msg = f"\nError with Openai API fallback: {str(e_fallback)}\n\nPlease check that you have set the OPENAI_API_KEY environment variable with a valid API key."
+                            error_msg = f"\nError with Openai API fallback: {str(e_fallback)}\n\nPlease check your OpenAI API key in Settings."
                             await websocket.send_text(error_msg)
                     elif request.provider == "bedrock":
                         try:
@@ -865,8 +868,7 @@ This file contains...
                             )
                             error_msg = (
                                 f"\nError with AWS Bedrock API fallback: {str(e_fallback)}\n\n"
-                                "Please check that you have set the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY "
-                                "environment variables with valid credentials."
+                                "Please check your AWS Bedrock credentials in Settings."
                             )
                             await websocket.send_text(error_msg)
                     elif request.provider == "azure":
@@ -893,7 +895,7 @@ This file contains...
                                             await websocket.send_text(text)
                         except Exception as e_fallback:
                             logger.error(f"Error with Azure AI API fallback: {str(e_fallback)}")
-                            error_msg = f"\nError with Azure AI API fallback: {str(e_fallback)}\n\nPlease check that you have set the AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, and AZURE_OPENAI_VERSION environment variables with valid values."
+                            error_msg = f"\nError with Azure AI API fallback: {str(e_fallback)}\n\nPlease check your Azure settings (API key, endpoint, version) in Settings."
                             await websocket.send_text(error_msg)
                     elif request.provider == "dashscope":
                         try:
@@ -920,8 +922,7 @@ This file contains...
                             )
                             error_msg = (
                                 f"\nError with Dashscope API fallback: {str(e_fallback)}\n\n"
-                                "Please check that you have set the DASHSCOPE_API_KEY (and optionally "
-                                "DASHSCOPE_WORKSPACE_ID) environment variables with valid values."
+                                "Please check your Dashscope settings (API key and optional workspace ID) in Settings."
                             )
                             await websocket.send_text(error_msg)
                     elif request.provider == "mlx":

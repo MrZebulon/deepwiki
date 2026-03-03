@@ -178,7 +178,14 @@ class OpenAIClient(ModelClient):
         self._api_key = api_key
         self._env_api_key_name = env_api_key_name
         self._env_base_url_name = env_base_url_name
-        self.base_url = base_url or os.getenv(self._env_base_url_name, "https://api.openai.com/v1")
+        if base_url:
+            self.base_url = base_url
+        elif self._env_api_key_name == "OPENAI_API_KEY":
+            from api.config import get_provider_credentials
+            settings_base_url = (get_provider_credentials("openai").get("baseUrl") or "").strip()
+            self.base_url = settings_base_url or "https://api.openai.com/v1"
+        else:
+            self.base_url = "https://api.openai.com/v1"
         self.sync_client = self.init_sync_client()
         self.async_client = None  # only initialize if the async call is called
         self.chat_completion_parser = (
@@ -188,7 +195,13 @@ class OpenAIClient(ModelClient):
         self._api_kwargs = {}  # add api kwargs when the OpenAI Client is called
 
     def init_sync_client(self):
-        api_key = self._api_key or os.getenv(self._env_api_key_name)
+        if self._api_key:
+            api_key = self._api_key
+        elif self._env_api_key_name == "OPENAI_API_KEY":
+            from api.config import get_provider_credentials
+            api_key = (get_provider_credentials("openai").get("apiKey") or "").strip()
+        else:
+            api_key = os.getenv(self._env_api_key_name)
         if not api_key:
             raise ValueError(
                 f"Environment variable {self._env_api_key_name} must be set"
@@ -196,7 +209,13 @@ class OpenAIClient(ModelClient):
         return OpenAI(api_key=api_key, base_url=self.base_url)
 
     def init_async_client(self):
-        api_key = self._api_key or os.getenv(self._env_api_key_name)
+        if self._api_key:
+            api_key = self._api_key
+        elif self._env_api_key_name == "OPENAI_API_KEY":
+            from api.config import get_provider_credentials
+            api_key = (get_provider_credentials("openai").get("apiKey") or "").strip()
+        else:
+            api_key = os.getenv(self._env_api_key_name)
         if not api_key:
             raise ValueError(
                 f"Environment variable {self._env_api_key_name} must be set"

@@ -99,6 +99,8 @@ class WikiCacheData(BaseModel):
     repo: Optional[RepoInfo] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    embedder_provider: Optional[str] = None
+    embedder_model: Optional[str] = None
 
 class WikiCacheRequest(BaseModel):
     """
@@ -110,6 +112,8 @@ class WikiCacheRequest(BaseModel):
     generated_pages: Dict[str, WikiPage]
     provider: str
     model: str
+    embedder_provider: Optional[str] = None
+    embedder_model: Optional[str] = None
 
 class WikiExportRequest(BaseModel):
     """
@@ -143,48 +147,49 @@ class ModelConfig(BaseModel):
     providers: List[Provider] = Field(..., description="List of available model providers")
     defaultProvider: str = Field(..., description="ID of the default provider")
 
+
+class EmbedderProvider(BaseModel):
+    id: str = Field(..., description="Embedder provider identifier")
+    name: str = Field(..., description="Display name for the embedder provider")
+    defaultModel: Optional[str] = Field(None, description="Default embedding model for this provider")
+    models: List[Model] = Field(default_factory=list, description="Suggested embedding models")
+    supportsCustomModel: Optional[bool] = Field(False, description="Whether this embedder supports custom model names")
+
+
+class EmbedderConfig(BaseModel):
+    providers: List[EmbedderProvider] = Field(..., description="List of available embedder providers")
+    defaultProvider: str = Field(..., description="ID of the default embedder provider")
+
 class AuthorizationConfig(BaseModel):
     code: str = Field(..., description="Authorization code")
 
-from api.config import configs, WIKI_AUTH_MODE, WIKI_AUTH_CODE
+class RuntimeSettingsUpdateRequest(BaseModel):
+    provider_keys: Optional[Dict[str, Any]] = None
+    embedder: Optional[Dict[str, Any]] = None
+    auth: Optional[Dict[str, Any]] = None
+    local: Optional[Dict[str, Any]] = None
+
+
+from api.config import (
+    configs,
+    get_auth_config,
+    update_runtime_preferences,
+    is_embedder_available,
+    get_embedder_preference,
+    is_model_provider_available,
+    resolve_model_provider,
+)
+from api.runtime_settings import load_runtime_settings
 
 
 def _is_provider_available(provider_id: str) -> bool:
     """
-    Determine whether a provider is available based on environment configuration.
+    Determine whether a provider is available based on runtime settings.
 
-    Providers that require credentials are exposed only when required env vars exist.
+    Providers that require credentials are exposed only when required keys exist.
     Local providers remain available without API keys.
     """
-    provider_id = provider_id.lower()
-
-    if provider_id == "google":
-        return bool(os.environ.get("GOOGLE_API_KEY"))
-    if provider_id == "openai":
-        return bool(os.environ.get("OPENAI_API_KEY"))
-    if provider_id == "openrouter":
-        return bool(os.environ.get("OPENROUTER_API_KEY"))
-    if provider_id == "azure":
-        return bool(
-            os.environ.get("AZURE_OPENAI_API_KEY")
-            and os.environ.get("AZURE_OPENAI_ENDPOINT")
-            and os.environ.get("AZURE_OPENAI_VERSION")
-        )
-    if provider_id == "dashscope":
-        return bool(os.environ.get("DASHSCOPE_API_KEY"))
-    if provider_id == "bedrock":
-        has_static_credentials = bool(
-            os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY")
-        )
-        has_role_or_profile = bool(os.environ.get("AWS_ROLE_ARN") or os.environ.get("AWS_PROFILE"))
-        return has_static_credentials or has_role_or_profile
-
-    # Local/self-hosted providers do not require API keys by default.
-    if provider_id in {"ollama", "mlx"}:
-        return True
-
-    # Unknown providers: keep them available by default to avoid breaking custom setups.
-    return True
+    return is_model_provider_available(provider_id)
 
 @app.get("/lang/config")
 async def get_lang_config():
@@ -195,14 +200,34 @@ async def get_auth_status():
     """
     Check if authentication is required for the wiki.
     """
-    return {"auth_required": WIKI_AUTH_MODE}
+    auth_config = get_auth_config()
+    return {"auth_required": auth_config["enabled"]}
 
 @app.post("/auth/validate")
 async def validate_auth_code(request: AuthorizationConfig):
     """
     Check authorization code.
     """
-    return {"success": WIKI_AUTH_CODE == request.code}
+    auth_config = get_auth_config()
+    expected_code = auth_config["code"]
+    return {"success": bool(expected_code) and expected_code == request.code}
+
+
+@app.get("/settings/provider-keys")
+async def get_provider_keys_settings():
+    """Return runtime provider/auth/embedder settings for Settings UI."""
+    return load_runtime_settings()
+
+
+@app.post("/settings/provider-keys")
+async def update_provider_keys_settings(request: RuntimeSettingsUpdateRequest):
+    """Persist runtime provider/auth/embedder settings from Settings UI."""
+    payload = request.model_dump(exclude_none=True)
+    updated = update_runtime_preferences(payload)
+    return {
+        "success": True,
+        "settings": updated,
+    }
 
 @app.get("/models/config", response_model=ModelConfig)
 async def get_model_config():
@@ -220,7 +245,7 @@ async def get_model_config():
 
         # Create providers from the config file
         providers = []
-        configured_default_provider = configs.get("default_provider", "google")
+        configured_default_provider = resolve_model_provider(configs.get("default_provider"))
 
         # Add provider configuration based on config.py
         for provider_id, provider_config in configs["providers"].items():
@@ -264,6 +289,67 @@ async def get_model_config():
         return ModelConfig(
             providers=[],
             defaultProvider=""
+        )
+
+
+@app.get("/embedders/config", response_model=EmbedderConfig)
+async def get_embedder_config():
+    """Get available embedding providers and default embedding provider."""
+    try:
+        logger.info("Fetching embedder configurations")
+
+        embedder_specs = [
+            ("openai", "OpenAI", "embedder", False),
+            ("google", "Google", "embedder_google", False),
+            ("bedrock", "Bedrock", "embedder_bedrock", False),
+            ("ollama", "Ollama (Local)", "embedder_ollama", True),
+            ("mlx", "MLX (Local)", "embedder_mlx", True),
+        ]
+
+        providers: List[EmbedderProvider] = []
+        for provider_id, provider_name, embedder_config_key, supports_custom_model in embedder_specs:
+            if not is_embedder_available(provider_id):
+                continue
+
+            default_model = None
+            model_suggestions: List[Model] = []
+
+            embedder_provider_config = configs.get(embedder_config_key, {})
+            if isinstance(embedder_provider_config, dict):
+                model_kwargs = embedder_provider_config.get("model_kwargs", {})
+                if isinstance(model_kwargs, dict):
+                    default_model = model_kwargs.get("model")
+
+            if default_model:
+                model_suggestions.append(Model(id=default_model, name=default_model))
+
+            providers.append(
+                EmbedderProvider(
+                    id=provider_id,
+                    name=provider_name,
+                    defaultModel=default_model,
+                    models=model_suggestions,
+                    supportsCustomModel=supports_custom_model,
+                )
+            )
+
+        available_provider_ids = {provider.id for provider in providers}
+        configured_default_provider = get_embedder_preference()
+        default_provider = (
+            configured_default_provider
+            if configured_default_provider in available_provider_ids
+            else (providers[0].id if providers else "")
+        )
+
+        return EmbedderConfig(
+            providers=providers,
+            defaultProvider=default_provider,
+        )
+    except Exception as e:
+        logger.error(f"Error creating embedder configuration: {str(e)}")
+        return EmbedderConfig(
+            providers=[],
+            defaultProvider="",
         )
 
 @app.post("/export/wiki")
@@ -505,7 +591,9 @@ async def save_wiki_cache(data: WikiCacheRequest) -> bool:
             generated_pages=data.generated_pages,
             repo=data.repo,
             provider=data.provider,
-            model=data.model
+            model=data.model,
+            embedder_provider=data.embedder_provider,
+            embedder_model=data.embedder_model,
         )
         # Log size of data to be cached for debugging (avoid logging full content if large)
         try:
@@ -593,9 +681,10 @@ async def delete_wiki_cache(
     if not supported_langs.__contains__(language):
         raise HTTPException(status_code=400, detail="Language is not supported")
 
-    if WIKI_AUTH_MODE:
+    auth_config = get_auth_config()
+    if auth_config["enabled"]:
         logger.info("check the authorization code")
-        if not authorization_code or WIKI_AUTH_CODE != authorization_code:
+        if not authorization_code or auth_config["code"] != authorization_code:
             raise HTTPException(status_code=401, detail="Authorization code is invalid")
 
     logger.info(f"Attempting to delete wiki cache for {owner}/{repo} ({repo_type}), lang: {language}, branch: {branch}, commit: {commit}")

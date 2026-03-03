@@ -1,0 +1,43 @@
+{
+  "provider_keys": {
+    "openai": {
+      "apiKey": "",
+      "baseUrl": "https://api.openai.com/v1"
+    },
+    "google": {
+      "apiKey": ""
+    },
+    "openrouter": {
+      "apiKey": ""
+    },
+    "azure": {
+      "apiKey": "",
+      "endpoint": "",
+      "apiVersion": ""
+    },
+    "dashscope": {
+      "apiKey": "",
+      "workspaceId": "",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    },
+    "bedrock": {
+      "accessKeyId": "",
+      "secretAccessKey": "",
+      "sessionToken": "",
+      "region": "us-east-1",
+      "roleArn": "",
+      "profile": ""
+    }
+  },
+  "embedder": {
+    "type": "openai"
+  },
+  "auth": {
+    "enabled": false,
+    "code": ""
+  },
+  "local": {
+    "ollamaHost": "http://localhost:11434",
+    "mlxHost": "http://localhost:8080"
+  }
+}

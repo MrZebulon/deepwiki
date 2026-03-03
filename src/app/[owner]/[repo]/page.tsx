@@ -113,6 +113,8 @@ const addTokensToRequestBody = (
   repoType: string,
   provider: string = '',
   model: string = '',
+  embedderProvider: string = '',
+  embedderModel: string = '',
   isCustomModel: boolean = false,
   customModel: string = '',
   language: string = 'en',
@@ -130,6 +132,12 @@ const addTokensToRequestBody = (
   // Add provider-based model selection parameters
   requestBody.provider = provider;
   requestBody.model = model;
+  if (embedderProvider) {
+    requestBody.embedder_provider = embedderProvider;
+  }
+  if (embedderModel) {
+    requestBody.embedder_model = embedderModel;
+  }
   if (isCustomModel && customModel) {
     requestBody.custom_model = customModel;
   }
@@ -211,6 +219,8 @@ export default function RepoWikiPage() {
   const repoUrl = searchParams.get('repo_url') ? decodeURIComponent(searchParams.get('repo_url') || '') : undefined;
   const providerParam = searchParams.get('provider') || '';
   const modelParam = searchParams.get('model') || '';
+  const embedderProviderParam = searchParams.get('embedder_provider') || '';
+  const embedderModelParam = searchParams.get('embedder_model') || '';
   const isCustomModelParam = searchParams.get('is_custom_model') === 'true';
   const customModelParam = searchParams.get('custom_model') || '';
   const branchParam = searchParams.get('branch') || '';
@@ -269,6 +279,8 @@ export default function RepoWikiPage() {
   // Model selection state variables
   const [selectedProviderState, setSelectedProviderState] = useState(providerParam);
   const [selectedModelState, setSelectedModelState] = useState(modelParam);
+  const [selectedEmbedderProviderState, setSelectedEmbedderProviderState] = useState(embedderProviderParam);
+  const [selectedEmbedderModelState, setSelectedEmbedderModelState] = useState(embedderModelParam);
   const [isCustomSelectedModelState, setIsCustomSelectedModelState] = useState(isCustomModelParam);
   const [customSelectedModelState, setCustomSelectedModelState] = useState(customModelParam);
   const [showModelOptions, setShowModelOptions] = useState(false); // Controls whether to show model options
@@ -563,7 +575,7 @@ Remember:
         };
 
         // Add tokens if available
-        addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles, effectiveRepoInfo.branch || undefined, effectiveRepoInfo.commit || undefined);
+        addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, selectedProviderState, selectedModelState, selectedEmbedderProviderState, selectedEmbedderModelState, isCustomSelectedModelState, customSelectedModelState, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles, effectiveRepoInfo.branch || undefined, effectiveRepoInfo.commit || undefined);
 
         // Use WebSocket for communication
         let content = '';
@@ -704,7 +716,7 @@ Remember:
         setLoadingMessage(undefined); // Clear specific loading message
       }
     });
-  }, [generatedPages, currentToken, effectiveRepoInfo, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, language, activeContentRequests, generateFileUrl]);
+  }, [generatedPages, currentToken, effectiveRepoInfo, selectedProviderState, selectedModelState, selectedEmbedderProviderState, selectedEmbedderModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, language, activeContentRequests, generateFileUrl]);
 
   // Determine the wiki structure from repository data
   const determineWikiStructure = useCallback(async (fileTree: string, readme: string, owner: string, repo: string) => {
@@ -860,7 +872,7 @@ IMPORTANT:
       };
 
       // Add tokens if available
-      addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles, effectiveRepoInfo.branch || undefined, effectiveRepoInfo.commit || undefined);
+      addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, selectedProviderState, selectedModelState, selectedEmbedderProviderState, selectedEmbedderModelState, isCustomSelectedModelState, customSelectedModelState, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles, effectiveRepoInfo.branch || undefined, effectiveRepoInfo.commit || undefined);
 
       // Use WebSocket for communication
       let responseText = '';
@@ -1187,7 +1199,7 @@ IMPORTANT:
     } finally {
       setStructureRequestInProgress(false);
     }
-  }, [generatePageContent, currentToken, effectiveRepoInfo, pagesInProgress.size, structureRequestInProgress, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, language, messages.loading, isComprehensiveView]);
+  }, [generatePageContent, currentToken, effectiveRepoInfo, pagesInProgress.size, structureRequestInProgress, selectedProviderState, selectedModelState, selectedEmbedderProviderState, selectedEmbedderModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, language, messages.loading, isComprehensiveView]);
 
   // Fetch repository structure using GitHub or GitLab API
   const fetchRepositoryStructure = useCallback(async () => {
@@ -1627,6 +1639,8 @@ IMPORTANT:
         language: language,
         provider: selectedProviderState,
         model: selectedModelState,
+        embedder_provider: selectedEmbedderProviderState,
+        embedder_model: selectedEmbedderModelState,
         is_custom_model: isCustomSelectedModelState.toString(),
         custom_model: customSelectedModelState,
         comprehensive: isComprehensiveView.toString(),
@@ -1646,6 +1660,12 @@ IMPORTANT:
       }
       if (modelExcludedFiles) {
         params.append('excluded_files', modelExcludedFiles);
+      }
+      if (selectedEmbedderProviderState) {
+        params.append('embedder_provider', selectedEmbedderProviderState);
+      }
+      if (selectedEmbedderModelState) {
+        params.append('embedder_model', selectedEmbedderModelState);
       }
 
       if(authRequired && !authCode) {
@@ -1741,7 +1761,7 @@ IMPORTANT:
     // For now, we rely on the standard loadData flow initiated by resetting effectRan and dependencies.
     // This will re-trigger the main data loading useEffect.
     // No direct call to fetchRepositoryStructure here, let the useEffect handle it based on effectRan.current = false.
-  }, [effectiveRepoInfo, language, messages.loading, activeContentRequests, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, isComprehensiveView, authCode, authRequired]);
+  }, [effectiveRepoInfo, language, messages.loading, activeContentRequests, selectedProviderState, selectedModelState, selectedEmbedderProviderState, selectedEmbedderModelState, isCustomSelectedModelState, customSelectedModelState, modelExcludedDirs, modelExcludedFiles, isComprehensiveView, authCode, authRequired]);
 
   // Start wiki generation when component mounts
   useEffect(() => {
@@ -1777,6 +1797,12 @@ IMPORTANT:
               }
               if(cachedData.provider) {
                 setSelectedProviderState(cachedData.provider);
+              }
+              if(cachedData.embedder_provider) {
+                setSelectedEmbedderProviderState(cachedData.embedder_provider);
+              }
+              if(cachedData.embedder_model) {
+                setSelectedEmbedderModelState(cachedData.embedder_model);
               }
 
               // Update repoInfo
@@ -1969,7 +1995,9 @@ IMPORTANT:
               wiki_structure: structureToCache,
               generated_pages: generatedPages,
               provider: selectedProviderState,
-              model: selectedModelState
+              model: selectedModelState,
+              embedder_provider: selectedEmbedderProviderState,
+              embedder_model: selectedEmbedderModelState,
             };
             const response = await fetch(`/api/wiki_cache`, {
               method: 'POST',
@@ -1992,7 +2020,7 @@ IMPORTANT:
     };
 
     saveCache();
-  }, [isLoading, error, wikiStructure, generatedPages, effectiveRepoInfo.owner, effectiveRepoInfo.repo, effectiveRepoInfo.type, effectiveRepoInfo.repoUrl, effectiveRepoInfo.branch, effectiveRepoInfo.commit, repoUrl, language, isComprehensiveView]);
+  }, [isLoading, error, wikiStructure, generatedPages, effectiveRepoInfo.owner, effectiveRepoInfo.repo, effectiveRepoInfo.type, effectiveRepoInfo.repoUrl, effectiveRepoInfo.branch, effectiveRepoInfo.commit, repoUrl, language, isComprehensiveView, selectedProviderState, selectedModelState, selectedEmbedderProviderState, selectedEmbedderModelState]);
 
   const handlePageSelect = (pageId: string) => {
     if (currentPageId != pageId) {
@@ -2319,6 +2347,10 @@ IMPORTANT:
         setIsCustomModel={setIsCustomSelectedModelState}
         customModel={customSelectedModelState}
         setCustomModel={setCustomSelectedModelState}
+        embedderProvider={selectedEmbedderProviderState}
+        setEmbedderProvider={setSelectedEmbedderProviderState}
+        embedderModel={selectedEmbedderModelState}
+        setEmbedderModel={setSelectedEmbedderModelState}
         isComprehensiveView={isComprehensiveView}
         setIsComprehensiveView={setIsComprehensiveView}
         showFileFilters={true}

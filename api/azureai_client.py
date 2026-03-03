@@ -231,14 +231,17 @@ class AzureAIClient(ModelClient):
         self._input_type = input_type
 
     def init_sync_client(self):
-        api_key = self._api_key or os.getenv("AZURE_OPENAI_API_KEY")
-        azure_endpoint = self._azure_endpoint or os.getenv("AZURE_OPENAI_ENDPOINT")
-        api_version = self._apiversion or os.getenv("AZURE_OPENAI_VERSION")
+        from api.config import get_provider_credentials
+
+        creds = get_provider_credentials("azure")
+        api_key = self._api_key or (creds.get("apiKey") or "")
+        azure_endpoint = self._azure_endpoint or (creds.get("endpoint") or "")
+        api_version = self._apiversion or (creds.get("apiVersion") or "")
         # credential = self._credential or DefaultAzureCredential
         if not azure_endpoint:
-            raise ValueError("Environment variable AZURE_OPENAI_ENDPOINT must be set")
+            raise ValueError("Azure endpoint must be set in Settings")
         if not api_version:
-            raise ValueError("Environment variable AZURE_OPENAI_VERSION must be set")
+            raise ValueError("Azure API version must be set in Settings")
 
         if api_key:
             return AzureOpenAI(
@@ -256,18 +259,21 @@ class AzureAIClient(ModelClient):
             )
         else:
             raise ValueError(
-                "Environment variable AZURE_OPENAI_API_KEY must be set or credential must be provided"
+                "Azure API key must be set in Settings or credential must be provided"
             )
 
     def init_async_client(self):
-        api_key = self._api_key or os.getenv("AZURE_OPENAI_API_KEY")
-        azure_endpoint = self._azure_endpoint or os.getenv("AZURE_OPENAI_ENDPOINT")
-        api_version = self._apiversion or os.getenv("AZURE_OPENAI_VERSION")
+        from api.config import get_provider_credentials
+
+        creds = get_provider_credentials("azure")
+        api_key = self._api_key or (creds.get("apiKey") or "")
+        azure_endpoint = self._azure_endpoint or (creds.get("endpoint") or "")
+        api_version = self._apiversion or (creds.get("apiVersion") or "")
         # credential = self._credential or DefaultAzureCredential()
         if not azure_endpoint:
-            raise ValueError("Environment variable AZURE_OPENAI_ENDPOINT must be set")
+            raise ValueError("Azure endpoint must be set in Settings")
         if not api_version:
-            raise ValueError("Environment variable AZURE_OPENAI_VERSION must be set")
+            raise ValueError("Azure API version must be set in Settings")
 
         if api_key:
             return AsyncAzureOpenAI(
@@ -285,7 +291,7 @@ class AzureAIClient(ModelClient):
             )
         else:
             raise ValueError(
-                "Environment variable AZURE_OPENAI_API_KEY must be set or credential must be provided"
+                "Azure API key must be set in Settings or credential must be provided"
             )
 
     # def _parse_chat_completion(self, completion: ChatCompletion) -> "GeneratorOutput":

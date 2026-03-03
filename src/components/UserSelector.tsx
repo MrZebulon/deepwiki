@@ -21,6 +21,19 @@ interface ModelConfig {
   defaultProvider: string;
 }
 
+interface EmbedderProvider {
+  id: string;
+  name: string;
+  defaultModel?: string;
+  models?: Model[];
+  supportsCustomModel?: boolean;
+}
+
+interface EmbedderConfig {
+  providers: EmbedderProvider[];
+  defaultProvider: string;
+}
+
 interface ModelSelectorProps {
   provider: string;
   setProvider: (value: string) => void;
@@ -30,6 +43,10 @@ interface ModelSelectorProps {
   setIsCustomModel: (value: boolean) => void;
   customModel: string;
   setCustomModel: (value: string) => void;
+  embedderProvider: string;
+  setEmbedderProvider: (value: string) => void;
+  embedderModel: string;
+  setEmbedderModel: (value: string) => void;
 
   // File filter configuration
   showFileFilters?: boolean;
@@ -52,6 +69,10 @@ export default function UserSelector({
   setIsCustomModel,
   customModel,
   setCustomModel,
+  embedderProvider,
+  setEmbedderProvider,
+  embedderModel,
+  setEmbedderModel,
 
   // File filter configuration
   showFileFilters = false,
@@ -72,6 +93,7 @@ export default function UserSelector({
 
   // State for model configurations from backend
   const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null);
+  const [embedderConfig, setEmbedderConfig] = useState<EmbedderConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,9 +102,30 @@ export default function UserSelector({
   const [showDefaultFiles, setShowDefaultFiles] = useState(false);
 
   const availableProviders = modelConfig?.providers || [];
+  const availableEmbedderProviders = embedderConfig?.providers || [];
   const selectedProviderConfig = availableProviders.find((p: Provider) => p.id === provider);
   const hasProviders = availableProviders.length > 0;
+  const hasEmbedderProviders = availableEmbedderProviders.length > 0;
   const hasModelsForSelectedProvider = Boolean(selectedProviderConfig?.models?.length);
+
+  const getProviderDisplayName = (providerOption: Provider) => {
+    if (providerOption.id === 'mlx') {
+      return 'MLX (Local)';
+    }
+
+    const translationKey = `provider${providerOption.id.charAt(0).toUpperCase() + providerOption.id.slice(1)}`;
+    return t.form?.[translationKey] || providerOption.name;
+  };
+
+  const getEmbedderDisplayName = (embedderOption: EmbedderProvider) => {
+    if (embedderOption.id === 'mlx') {
+      return 'MLX (Local)';
+    }
+    if (embedderOption.id === 'ollama') {
+      return 'Ollama (Local)';
+    }
+    return embedderOption.name;
+  };
 
   // Fetch model configurations from the backend
   useEffect(() => {
@@ -91,14 +134,23 @@ export default function UserSelector({
         setIsLoading(true);
         setError(null);
 
-        const response = await fetch('/api/models/config');
+        const [modelResponse, embedderResponse] = await Promise.all([
+          fetch('/api/models/config'),
+          fetch('/api/embedders/config'),
+        ]);
 
-        if (!response.ok) {
-          throw new Error(`Error fetching model configurations: ${response.status}`);
+        if (!modelResponse.ok) {
+          throw new Error(`Error fetching model configurations: ${modelResponse.status}`);
         }
 
-        const data = await response.json();
+        if (!embedderResponse.ok) {
+          throw new Error(`Error fetching embedder configurations: ${embedderResponse.status}`);
+        }
+
+        const data = await modelResponse.json();
+        const embedderData = await embedderResponse.json();
         setModelConfig(data);
+        setEmbedderConfig(embedderData);
 
         const providers: Provider[] = Array.isArray(data.providers) ? data.providers : [];
         const resolvedDefaultProvider = providers.find((p: Provider) => p.id === data.defaultProvider)?.id
@@ -108,6 +160,43 @@ export default function UserSelector({
         if (providers.length === 0) {
           setProvider('');
           setModel('');
+          setIsCustomModel(false);
+          setCustomModel('');
+          return;
+        }
+
+        const embedderProviders: EmbedderProvider[] = Array.isArray(embedderData.providers) ? embedderData.providers : [];
+        const resolvedDefaultEmbedderProvider = embedderProviders.find((p: EmbedderProvider) => p.id === embedderData.defaultProvider)?.id
+          || embedderProviders[0]?.id
+          || '';
+
+        if (embedderProviders.length === 0) {
+          setEmbedderProvider('');
+          setEmbedderModel('');
+        } else if (embedderProvider && !embedderProviders.some((p: EmbedderProvider) => p.id === embedderProvider)) {
+          setEmbedderProvider(resolvedDefaultEmbedderProvider);
+          const fallbackEmbedder = embedderProviders.find((p: EmbedderProvider) => p.id === resolvedDefaultEmbedderProvider);
+          setEmbedderModel(fallbackEmbedder?.defaultModel || '');
+        } else if (!embedderProvider && resolvedDefaultEmbedderProvider) {
+          setEmbedderProvider(resolvedDefaultEmbedderProvider);
+          const defaultEmbedder = embedderProviders.find((p: EmbedderProvider) => p.id === resolvedDefaultEmbedderProvider);
+          setEmbedderModel(defaultEmbedder?.defaultModel || '');
+        } else if (embedderProvider && !embedderModel) {
+          const currentEmbedder = embedderProviders.find((p: EmbedderProvider) => p.id === embedderProvider);
+          if (currentEmbedder?.defaultModel) {
+            setEmbedderModel(currentEmbedder.defaultModel);
+          }
+        }
+
+        // If the current provider is unavailable (e.g., filtered out by backend), reset to default.
+        if (provider && !providers.some((p: Provider) => p.id === provider)) {
+          setProvider(resolvedDefaultProvider);
+          const fallbackProvider = providers.find((p: Provider) => p.id === resolvedDefaultProvider);
+          if (fallbackProvider && fallbackProvider.models.length > 0) {
+            setModel(fallbackProvider.models[0].id);
+          } else {
+            setModel('');
+          }
           setIsCustomModel(false);
           setCustomModel('');
           return;
@@ -134,7 +223,7 @@ export default function UserSelector({
     };
 
     fetchModelConfig();
-  }, [provider, setModel, setProvider]);
+  }, [provider, embedderProvider, embedderModel, setModel, setProvider, setEmbedderProvider, setEmbedderModel]);
 
   // Handler for changing provider
   const handleProviderChange = (newProvider: string) => {
@@ -300,6 +389,58 @@ next.config.js
 
         {/* Provider Selection */}
         <div>
+          <label htmlFor="embedder-provider-dropdown" className="block text-xs font-medium text-[var(--foreground)] mb-1.5">
+            Embedding Provider
+          </label>
+          <select
+            id="embedder-provider-dropdown"
+            value={embedderProvider}
+            onChange={(e) => {
+              const selectedId = e.target.value;
+              setEmbedderProvider(selectedId);
+              const selectedEmbedder = availableEmbedderProviders.find((providerOption) => providerOption.id === selectedId);
+              setEmbedderModel(selectedEmbedder?.defaultModel || '');
+            }}
+            className="input-japanese block w-full px-2.5 py-1.5 text-sm rounded-md bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+            disabled={!hasEmbedderProviders}
+          >
+            {!hasEmbedderProviders ? (
+              <option value="">No Embedding Providers Available</option>
+            ) : (
+              <option value="" disabled>Select Embedding Provider</option>
+            )}
+            {availableEmbedderProviders.map((embedderOption) => (
+              <option key={embedderOption.id} value={embedderOption.id}>
+                {getEmbedderDisplayName(embedderOption)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {(embedderProvider === 'ollama' || embedderProvider === 'mlx') && (
+          <div>
+            <label htmlFor="embedder-model-input" className="block text-xs font-medium text-[var(--foreground)] mb-1.5">
+              Embedding Model
+            </label>
+            <input
+              id="embedder-model-input"
+              type="text"
+              value={embedderModel}
+              onChange={(e) => setEmbedderModel(e.target.value)}
+              list="embedder-model-suggestions"
+              placeholder={embedderProvider === 'ollama' ? 'e.g. nomic-embed-text' : 'e.g. mlx-community/all-MiniLM-L6-v2-4bit'}
+              className="input-japanese block w-full px-2.5 py-1.5 text-sm rounded-md bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)]"
+            />
+            <datalist id="embedder-model-suggestions">
+              {(availableEmbedderProviders.find((providerOption) => providerOption.id === embedderProvider)?.models || []).map((modelOption) => (
+                <option key={modelOption.id} value={modelOption.id} />
+              ))}
+            </datalist>
+          </div>
+        )}
+
+        {/* Provider Selection */}
+        <div>
           <label htmlFor="provider-dropdown" className="block text-xs font-medium text-[var(--foreground)] mb-1.5">
             {t.form?.modelProvider || 'Model Provider'}
           </label>
@@ -317,7 +458,7 @@ next.config.js
             )}
             {availableProviders.map((providerOption) => (
               <option key={providerOption.id} value={providerOption.id}>
-                {t.form?.[`provider${providerOption.id.charAt(0).toUpperCase() + providerOption.id.slice(1)}`] || providerOption.name}
+                {getProviderDisplayName(providerOption)}
               </option>
             ))}
           </select>

@@ -44,10 +44,10 @@ class OpenRouterClient(ModelClient):
 
     def init_sync_client(self):
         """Initialize the synchronous OpenRouter client."""
-        from api.config import OPENROUTER_API_KEY
-        api_key = OPENROUTER_API_KEY
+        from api.config import get_provider_credentials
+        api_key = (get_provider_credentials("openrouter").get("apiKey") or "").strip()
         if not api_key:
-            log.warning("OPENROUTER_API_KEY not configured")
+            log.warning("OpenRouter API key not configured")
 
         # OpenRouter doesn't have a dedicated client library, so we'll use requests directly
         return {
@@ -57,10 +57,10 @@ class OpenRouterClient(ModelClient):
 
     def init_async_client(self):
         """Initialize the asynchronous OpenRouter client."""
-        from api.config import OPENROUTER_API_KEY
-        api_key = OPENROUTER_API_KEY
+        from api.config import get_provider_credentials
+        api_key = (get_provider_credentials("openrouter").get("apiKey") or "").strip()
         if not api_key:
-            log.warning("OPENROUTER_API_KEY not configured")
+            log.warning("OpenRouter API key not configured")
 
         # For async, we'll use aiohttp
         return {
@@ -116,7 +116,7 @@ class OpenRouterClient(ModelClient):
 
         # Check if API key is set
         if not self.async_client.get("api_key"):
-            error_msg = "OPENROUTER_API_KEY not configured. Please set this environment variable to use OpenRouter."
+            error_msg = "OpenRouter API key is not configured. Please set it in Settings to use OpenRouter."
             log.error(error_msg)
             # Instead of raising an exception, return a generator that yields the error message
             # This allows the error to be displayed to the user in the streaming response

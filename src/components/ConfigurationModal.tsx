@@ -30,6 +30,10 @@ interface ConfigurationModalProps {
   setIsCustomModel: (value: boolean) => void;
   customModel: string;
   setCustomModel: (value: string) => void;
+  embedderProvider: string;
+  setEmbedderProvider: (value: string) => void;
+  embedderModel: string;
+  setEmbedderModel: (value: string) => void;
 
   // Platform selection
   selectedPlatform: 'github' | 'gitlab' | 'bitbucket';
@@ -83,6 +87,10 @@ export default function ConfigurationModal({
   setIsCustomModel,
   customModel,
   setCustomModel,
+  embedderProvider,
+  setEmbedderProvider,
+  embedderModel,
+  setEmbedderModel,
   selectedPlatform,
   setSelectedPlatform,
   accessToken,
@@ -229,6 +237,10 @@ export default function ConfigurationModal({
                 setIsCustomModel={setIsCustomModel}
                 customModel={customModel}
                 setCustomModel={setCustomModel}
+                embedderProvider={embedderProvider}
+                setEmbedderProvider={setEmbedderProvider}
+                embedderModel={embedderModel}
+                setEmbedderModel={setEmbedderModel}
                 showFileFilters={true}
                 excludedDirs={excludedDirs}
                 setExcludedDirs={setExcludedDirs}

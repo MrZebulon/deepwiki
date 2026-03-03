@@ -6,7 +6,6 @@ import adalflow as adal
 from adalflow.core.types import Document
 from adalflow.core.component import DataComponent
 import requests
-import os
 
 # Configure logging
 from api.logging_config import setup_logging
@@ -30,7 +29,11 @@ def check_ollama_model_exists(model_name: str, ollama_host: str = None) -> bool:
         bool: True if model exists, False otherwise
     """
     if ollama_host is None:
-        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        try:
+            from api.runtime_settings import load_runtime_settings
+            ollama_host = load_runtime_settings().get("local", {}).get("ollamaHost", "http://localhost:11434")
+        except Exception:
+            ollama_host = "http://localhost:11434"
     
     try:
         # Remove /api prefix if present and add it back

@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from api.config import get_model_config, configs, OPENROUTER_API_KEY, OPENAI_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+from api.config import get_model_config, configs, has_provider_credentials, resolve_model_provider
 from api.data_pipeline import count_tokens, get_file_content
 from api.openai_client import OpenAIClient
 from api.openrouter_client import OpenRouterClient
@@ -67,8 +67,10 @@ class ChatCompletionRequest(BaseModel):
     commit: Optional[str] = Field(None, description="Optional commit SHA to process (takes precedence over branch)")
 
     # model parameters
-    provider: str = Field("google", description="Model provider (google, openai, openrouter, ollama, bedrock, azure, dashscope, mlx)")
+    provider: str = Field(default_factory=resolve_model_provider, description="Model provider (google, openai, openrouter, ollama, bedrock, azure, dashscope, mlx)")
     model: Optional[str] = Field(None, description="Model name for the specified provider")
+    embedder_provider: Optional[str] = Field(None, description="Embedder provider (openai, google, bedrock, ollama, mlx)")
+    embedder_model: Optional[str] = Field(None, description="Embedding model name for the selected embedder provider")
 
     language: Optional[str] = Field("en", description="Language for content generation (e.g., 'en', 'ja', 'zh', 'es', 'kr', 'vi')")
     excluded_dirs: Optional[str] = Field(None, description="Comma-separated list of directories to exclude from processing")
@@ -93,7 +95,12 @@ async def chat_completions_stream(request: ChatCompletionRequest):
 
         # Create a new RAG instance for this request
         try:
-            request_rag = RAG(provider=request.provider, model=request.model)
+            request_rag = RAG(
+                provider=request.provider,
+                model=request.model,
+                embedder_type=request.embedder_provider,
+                embedder_model=request.embedder_model,
+            )
 
             # Extract custom file filter parameters if provided
             excluded_dirs = None
@@ -365,8 +372,8 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             logger.info(f"Using OpenRouter with model: {request.model}")
 
             # Check if OpenRouter API key is set
-            if not OPENROUTER_API_KEY:
-                logger.warning("OPENROUTER_API_KEY not configured, but continuing with request")
+            if not has_provider_credentials("openrouter"):
+                logger.warning("OpenRouter API key not configured, but continuing with request")
                 # We'll let the OpenRouterClient handle this and return a friendly error message
 
             model = OpenRouterClient()
@@ -388,8 +395,8 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             logger.info(f"Using Openai protocol with model: {request.model}")
 
             # Check if an API key is set for Openai
-            if not OPENAI_API_KEY:
-                logger.warning("OPENAI_API_KEY not configured, but continuing with request")
+            if not has_provider_credentials("openai"):
+                logger.warning("OpenAI API key not configured, but continuing with request")
                 # We'll let the OpenAIClient handle this and return an error message
 
             # Initialize Openai client
@@ -412,8 +419,8 @@ async def chat_completions_stream(request: ChatCompletionRequest):
             logger.info(f"Using AWS Bedrock with model: {request.model}")
 
             # Check if AWS credentials are set
-            if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
-                logger.warning("AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY not configured, but continuing with request")
+            if not has_provider_credentials("bedrock"):
+                logger.warning("AWS Bedrock credentials not configured, but continuing with request")
                 # We'll let the BedrockClient handle this and return an error message
 
             # Initialize Bedrock client
@@ -512,7 +519,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                             yield chunk
                     except Exception as e_openrouter:
                         logger.error(f"Error with OpenRouter API: {str(e_openrouter)}")
-                        yield f"\nError with OpenRouter API: {str(e_openrouter)}\n\nPlease check that you have set the OPENROUTER_API_KEY environment variable with a valid API key."
+                        yield f"\nError with OpenRouter API: {str(e_openrouter)}\n\nPlease check your OpenRouter API key in Settings."
                 elif request.provider == "openai":
                     try:
                         # Get the response and handle it properly using the previously created api_kwargs
@@ -529,7 +536,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                                         yield text
                     except Exception as e_openai:
                         logger.error(f"Error with Openai API: {str(e_openai)}")
-                        yield f"\nError with Openai API: {str(e_openai)}\n\nPlease check that you have set the OPENAI_API_KEY environment variable with a valid API key."
+                        yield f"\nError with Openai API: {str(e_openai)}\n\nPlease check your OpenAI API key in Settings."
                 elif request.provider == "bedrock":
                     try:
                         # Get the response and handle it properly using the previously created api_kwargs
@@ -543,7 +550,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                             yield str(response)
                     except Exception as e_bedrock:
                         logger.error(f"Error with AWS Bedrock API: {str(e_bedrock)}")
-                        yield f"\nError with AWS Bedrock API: {str(e_bedrock)}\n\nPlease check that you have set the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables with valid credentials."
+                        yield f"\nError with AWS Bedrock API: {str(e_bedrock)}\n\nPlease check your AWS Bedrock credentials in Settings."
                 elif request.provider == "azure":
                     try:
                         # Get the response and handle it properly using the previously created api_kwargs
@@ -560,7 +567,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                                         yield text
                     except Exception as e_azure:
                         logger.error(f"Error with Azure AI API: {str(e_azure)}")
-                        yield f"\nError with Azure AI API: {str(e_azure)}\n\nPlease check that you have set the AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, and AZURE_OPENAI_VERSION environment variables with valid values."
+                        yield f"\nError with Azure AI API: {str(e_azure)}\n\nPlease check your Azure settings (API key, endpoint, version) in Settings."
                 elif request.provider == "dashscope":
                     try:
                         logger.info("Making Dashscope API call")
@@ -576,8 +583,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                         logger.error(f"Error with Dashscope API: {str(e_dashscope)}")
                         yield (
                             f"\nError with Dashscope API: {str(e_dashscope)}\n\n"
-                            "Please check that you have set the DASHSCOPE_API_KEY (and optionally "
-                            "DASHSCOPE_WORKSPACE_ID) environment variables with valid values."
+                            "Please check your Dashscope settings (API key and optional workspace ID) in Settings."
                         )
                 elif request.provider == "mlx":
                     try:
@@ -662,7 +668,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                                     yield chunk
                             except Exception as e_fallback:
                                 logger.error(f"Error with OpenRouter API fallback: {str(e_fallback)}")
-                                yield f"\nError with OpenRouter API fallback: {str(e_fallback)}\n\nPlease check that you have set the OPENROUTER_API_KEY environment variable with a valid API key."
+                                yield f"\nError with OpenRouter API fallback: {str(e_fallback)}\n\nPlease check your OpenRouter API key in Settings."
                         elif request.provider == "openai":
                             try:
                                 # Create new api_kwargs with the simplified prompt
@@ -682,7 +688,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                                     yield text
                             except Exception as e_fallback:
                                 logger.error(f"Error with Openai API fallback: {str(e_fallback)}")
-                                yield f"\nError with Openai API fallback: {str(e_fallback)}\n\nPlease check that you have set the OPENAI_API_KEY environment variable with a valid API key."
+                                yield f"\nError with Openai API fallback: {str(e_fallback)}\n\nPlease check your OpenAI API key in Settings."
                         elif request.provider == "bedrock":
                             try:
                                 # Create new api_kwargs with the simplified prompt
@@ -704,7 +710,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                                     yield str(fallback_response)
                             except Exception as e_fallback:
                                 logger.error(f"Error with AWS Bedrock API fallback: {str(e_fallback)}")
-                                yield f"\nError with AWS Bedrock API fallback: {str(e_fallback)}\n\nPlease check that you have set the AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables with valid credentials."
+                                yield f"\nError with AWS Bedrock API fallback: {str(e_fallback)}\n\nPlease check your AWS Bedrock credentials in Settings."
                         elif request.provider == "azure":
                             try:
                                 # Create new api_kwargs with the simplified prompt
@@ -729,7 +735,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                                                 yield text
                             except Exception as e_fallback:
                                 logger.error(f"Error with Azure AI API fallback: {str(e_fallback)}")
-                                yield f"\nError with Azure AI API fallback: {str(e_fallback)}\n\nPlease check that you have set the AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, and AZURE_OPENAI_VERSION environment variables with valid values."
+                                yield f"\nError with Azure AI API fallback: {str(e_fallback)}\n\nPlease check your Azure settings (API key, endpoint, version) in Settings."
                         elif request.provider == "dashscope":
                             try:
                                 # Create new api_kwargs with the simplified prompt
@@ -755,8 +761,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                                 )
                                 yield (
                                     f"\nError with Dashscope API fallback: {str(e_fallback)}\n\n"
-                                    "Please check that you have set the DASHSCOPE_API_KEY (and optionally "
-                                    "DASHSCOPE_WORKSPACE_ID) environment variables with valid values."
+                                    "Please check your Dashscope settings (API key and optional workspace ID) in Settings."
                                 )
                         elif request.provider == "mlx":
                             try:

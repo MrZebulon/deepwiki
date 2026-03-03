@@ -17,6 +17,7 @@ const addTokensToRequestBody = (
   repoType: string,
   provider: string = '',
   model: string = '',
+  embedderProvider: string = '',
   isCustomModel: boolean = false,
   customModel: string = '',
   language: string = 'en',
@@ -30,6 +31,9 @@ const addTokensToRequestBody = (
   // Add provider-based model selection parameters
   requestBody.provider = provider;
   requestBody.model = model;
+  if (embedderProvider) {
+    requestBody.embedder_provider = embedderProvider;
+  }
   if (isCustomModel && customModel) {
     requestBody.custom_model = customModel;
   }
@@ -67,6 +71,7 @@ export default function SlidesPage() {
   const repoUrl = searchParams.get('repo_url') ? decodeURIComponent(searchParams.get('repo_url') || '') : undefined;
   const providerParam = searchParams.get('provider') || '';
   const modelParam = searchParams.get('model') || '';
+  const embedderProviderParam = searchParams.get('embedder_provider') || '';
   const isCustomModelParam = searchParams.get('is_custom_model') === 'true';
   const customModelParam = searchParams.get('custom_model') || '';
   const branchParam = searchParams.get('branch') || '';
@@ -278,7 +283,7 @@ Give me the numbered list with brief descriptions for each slide. Be creative bu
       };
 
       // Add tokens if available
-      addTokensToRequestBody(planRequestBody, token, repoInfo.type, providerParam, modelParam, isCustomModelParam, customModelParam, language, repoInfo.branch || undefined, repoInfo.commit || undefined);
+      addTokensToRequestBody(planRequestBody, token, repoInfo.type, providerParam, modelParam, embedderProviderParam, isCustomModelParam, customModelParam, language, repoInfo.branch || undefined, repoInfo.commit || undefined);
 
       // Use WebSocket for communication
       let planContent = '';
@@ -554,7 +559,7 @@ Please return ONLY the HTML with no markdown formatting or code blocks. Just the
         };
 
         // Add tokens if available
-        addTokensToRequestBody(slideRequestBody, token, repoInfo.type, providerParam, modelParam, isCustomModelParam, customModelParam, language, repoInfo.branch || undefined, repoInfo.commit || undefined);
+        addTokensToRequestBody(slideRequestBody, token, repoInfo.type, providerParam, modelParam, embedderProviderParam, isCustomModelParam, customModelParam, language, repoInfo.branch || undefined, repoInfo.commit || undefined);
 
         // Use WebSocket for communication
         let slideContent = '';

@@ -36,10 +36,6 @@ from api.logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Default MLX server host
-MLX_HOST = os.environ.get("MLX_HOST", "http://localhost:8080")
-
-
 class MLXModelNotFoundError(Exception):
     """Custom exception for when an MLX model is not available."""
     pass
@@ -47,7 +43,12 @@ class MLXModelNotFoundError(Exception):
 
 def _base_url() -> str:
     """Return the base URL for the MLX server, stripping trailing slashes."""
-    return MLX_HOST.rstrip("/")
+    try:
+        from api.runtime_settings import load_runtime_settings
+        host = load_runtime_settings().get("local", {}).get("mlxHost", "http://localhost:8080")
+    except Exception:
+        host = "http://localhost:8080"
+    return host.rstrip("/")
 
 
 def check_mlx_server_running(mlx_host: Optional[str] = None) -> bool:

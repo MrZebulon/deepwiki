@@ -18,6 +18,7 @@ const addTokensToRequestBody = (
   repoType: string,
   provider: string = '',
   model: string = '',
+  embedderProvider: string = '',
   isCustomModel: boolean = false,
   customModel: string = '',
   language: string = 'en',
@@ -31,6 +32,9 @@ const addTokensToRequestBody = (
   // Add provider-based model selection parameters
   requestBody.provider = provider;
   requestBody.model = model;
+  if (embedderProvider) {
+    requestBody.embedder_provider = embedderProvider;
+  }
   if (isCustomModel && customModel) {
     requestBody.custom_model = customModel;
   }
@@ -61,6 +65,7 @@ export default function WorkshopPage() {
   const repoUrl = searchParams.get('repo_url') ? decodeURIComponent(searchParams.get('repo_url') || '') : undefined;
   const providerParam = searchParams.get('provider') || '';
   const modelParam = searchParams.get('model') || '';
+  const embedderProviderParam = searchParams.get('embedder_provider') || '';
   const isCustomModelParam = searchParams.get('is_custom_model') === 'true';
   const customModelParam = searchParams.get('custom_model') || '';
   const branchParam = searchParams.get('branch') || '';
@@ -330,7 +335,7 @@ Make the workshop content in ${language === 'en' ? 'English' :
       };
 
       // Add tokens if available
-      addTokensToRequestBody(requestBody, token, repoInfo.type, providerParam, modelParam, isCustomModelParam, customModelParam, language, repoInfo.branch || undefined, repoInfo.commit || undefined);
+      addTokensToRequestBody(requestBody, token, repoInfo.type, providerParam, modelParam, embedderProviderParam, isCustomModelParam, customModelParam, language, repoInfo.branch || undefined, repoInfo.commit || undefined);
 
       // Use WebSocket for communication
       let content = '';
